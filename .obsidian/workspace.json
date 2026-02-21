@@ -14,7 +14,7 @@
               "type": "markdown",
               "state": {
                 "file": "misc/Терминал и Finder (Команды 1).md",
-                "mode": "preview",
+                "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
@@ -187,12 +187,12 @@
   "active": "0c7341d93b0a686a",
   "lastOpenFiles": [
     "misc/Терминал и Finder (Команды 1).md",
+    "misc",
     "Teletype_0x/Cach/уауа/a4a339fe-77a9-464c-9f39-0aa538dc8ccf.png",
     "misc/уауа.md",
     "Teletype_0x/Cach/уауа/b94eb7d1-34d5-4ced-bfc6-221d0036db6c.png",
     "Teletype_0x/Cach/уауа/a3b78802-ac7d-4b2d-976a-4225d7be3976.jpeg",
     "Teletype_0x/Cach/уауа",
-    "misc",
     "Teletype_0x/Cach/вым",
     "windows/вым.md",
     "Teletype_0x/Cach/кмммммм/a3b78802-ac7d-4b2d-976a-4225d7be3976.jpeg",
@@ -230,7 +230,6 @@
     "windows/1212112.md",
     "настройки/УЛЯЛЯЛЯ.md",
     "misc/привет барсук.md",
-    "misc/привет.md",
-    "misc/1231312313.md"
+    "misc/привет.md"
   ]
 }

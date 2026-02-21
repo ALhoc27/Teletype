@@ -4,7 +4,7 @@ from bs4 import BeautifulSoup, NavigableString
 from markdownify import markdownify as md
 from pathlib import Path
 from datetime import datetime
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, urlunparse, unquote
 import json
 import re
 import sys
@@ -78,31 +78,36 @@ def normalize_md(text: str) -> str:
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip() + "\n"
 
-# ===== DRAW.IO IFRAME SUPPORT (ссылка) =====
-def extract_drawio_link_markdown(iframe_tag):
-    """
-    Превращает iframe Draw.io в кликабельную ссылку в Markdown.
-    """
-    src = iframe_tag.get("src")
-    if not src:
-        return None
-    return f"[Open diagram]({src})"
+# ================= IFRAME PROCESSING ===================
 
-# ===== Тест Draw.io =====
-def test_drawio_extraction():
-    test_html = '''
-    <iframe frameborder="0" style="width:100%;height:203px;"
-    src="https://viewer.diagrams.net/?tags=%7B%7D&lightbox=1&highlight=0000ff&edit=_blank&layers=1&nav=1&dark=auto#R%3Cmxfile%3E%3Cdiagram%20name%3D%22Test%22%3EzVjfb%2BMoEP5b7iHS7kMq%2F4jT5LFO2r3TtVLVrvZuH2lME642eDFpkvvrbwYwhjhp06qVToocmBkGmG%2F8wXiQzqrtN0nq1Y0oaDlIomI7SOeDJJmOxvBEwc4IsnFqBEvJCiOKO8E9%2B5daYWSla1bQJjBUQpSK1aFwITinCxXIiJRiE5o9ijKctSZL2hPcL0jZl%2F7FCrUy0kly3sl%2Fp2y5ameOx1OjqUhrbHfSrEghNp4ovRykMymEMq1qO6Mlxq6Nixl3dUTrFiYpV6cMIPzu%2Bmcuftzc%2F8mpvJpPfg1%2FDJO%2BF%2Bu4Ubs2BlKseUHRTTxI882KKXpfkwVqNwA6yFaqKq3ajH4m5dqOHiTjElznTU144Hf8a417zxeiFHKQXoBSLh%2FIF9jGDNp7f1%2B1bwCQq%2BEjqVi5M0MqwUVjVuP0jU4j1Eb11sgV3aohKdmSG0WjiFSeCjcyrCB7jZoLu7NumdBamv9sP90ziDhKNZiu1yKQaQxAMsc2opRhVDJA6jXb2Nm2EL3LTXLcjTeDQcZpMCzY8wFHpQ4MyjXoKIl1t3NkwHeO4DHH1U51C40neSvLnTa%2FdK2R9hKa6GGxk2VOloXGV651SNbNcREOm7iudjo64GXqWvkBf0nrwOYLRqRswr4XISohvAdQcDh%2Bo6KiSu60%2BcowjDMfdeBHG81KHdSxp%2FNniDz5rpNPPTFpOvnSm38%2Fy3TXpZovDF8Aa9d7UwwfAFMZSmhfK80bJjAdEVku68LRBsOcJpZbNx01O761XtLMdO3502qJPRe6fXbUOXC7ewOTjoxfWvTOk5eoFc3vbVdItRJLwUl52Unzjnwj6HU210LUlnL%2FoUrt7NFJ1kq8SsiHwippSRR7Dhd%2FKEp26K1gyCNtmONRdBZG%2Bnwv0o1YywW1w%2Fxz6lVPOnd9V8DdS6p6rjRubkvvh%2FIk5DQ9vuM0BBiBCEEJJAjtXEuASPAJORS1QjCIdTvT7axVXemn3zZjL1qDiW7AkJFnOdXP3LPHdXWHG1JVd9C9401M%2B29iPMmCN7F9WXfhiA9%2FE9PPhu9ShzexYcd25AV26mmzFovEg9IYzyxY%2BJx7SOUhji4Z8h7iuTd20pvUrM0Zz7wp5jbZcEiq7zsfA3gyDgFPkgDw6fiTAD8%2FBXC4ftfYBCvFSHkHxQLhS02xj6wsZ%2BYSOueCo8jeFOclfcQ0wdgwKAourLhiRaGHNkqKJ7o3GK%2BjjC%2Bv9dh5OtIsrogiD3oxyOM1cpeOQ5YP9C1jhqyXzfG2m%2BVx14cfmks1ExxmI0xvkZJGbWiDayukqL9rQrS%2Be0mLL%2FfHIDwNz9Y4DhGOk8%2BCeDLwqzwbyK628qF%2FKUVOywelT1YMpYFfNx%2BEUqKynQMZ0yhIhLZERO4oSLNyRdPJ%2BRSkzqiT3FlcUCRg%2BGOpa8kVDKT81QR7LYdqXQwdvy58RO58Gt9PP5Pv31a8fonPTbmajMx%2FGh%2BrW8EFqXB66%2BiP%2FAaktyWWBdE94c2%2BgV%2FfmmWYQlVWpPR0z0QyAv%2BQWUStJX47edFuQepjJhsLKCpHkaGWqITLJpVDm5b9kULWK1y9ViSnFd8MbrhcHarYIVl58wju24m4rfMhsfS3HW%2BWjZBFuC7nC7by8MTAHfo0nD20qRnY6fQY2s8J%2Bzt7IIunpb6OD%2FdQT7LMwu41vnrbKOhCSLheCz5UK7Z44rSxa2ecIf0ctvVwftHOW05gByRB1H7kCtbUJdm15iUDRRL9xiokCMLVkY8e5j3AvHCy%2F9VV1sxiB4487WlXJqsFycyzaW90bj1W5ZZ02bvRmZWMPfvMOsGAu9I3COQHVsSHiDfdO7XDe3g8%2FSxibic6qSbW1eGbTnDKiwv8wgu9RUmahi1CMg8rZ7pl6m9sn6VxbPs%2F0fIsAtI2%2FfnWM57vvM4tlQyCQuWxO9bryLTlz8FC24MrewGOwxVzOg0R7X3keEPp%2FXJqvLvwHthvQ55591UovfwP%3C%2Fdiagram%3E%3C%2Fmxfile%3E"></iframe>
-    '''
-    soup = BeautifulSoup(test_html, "html.parser")
-    iframe_tag = soup.find("iframe")
-    link_md = extract_drawio_link_markdown(iframe_tag)
-    print("=== TEST DRAW.IO LINK ===")
-    print(link_md)
+def process_iframes(soup: BeautifulSoup, base_url: str):
+    for iframe in soup.find_all("iframe"):
+        src = iframe.get("src")
+        if not src:
+            iframe.decompose()
+            continue
+
+        iframe_url = urljoin(base_url, src)
+        parsed = urlparse(iframe_url)
+
+        # ⚠ Декодируем ТОЛЬКО fragment, иначе viewer.diagrams.net ломается
+        decoded_fragment = unquote(parsed.fragment)
+
+        clean_url = urlunparse((
+            parsed.scheme,
+            parsed.netloc,
+            parsed.path,
+            parsed.params,
+            parsed.query,
+            decoded_fragment
+        ))
+
+        replacement = f"\n\n[Открыть диаграмму]({clean_url})\n\n"
+        iframe.replace_with(replacement)
 
 # ================= RSS =======================
 
-feed = feedparser.parse(RSS_URL)
+feed = feedparser.parse(RSS_URL, sanitize_html=False)
 if not feed.entries:
     print("❌ RSS пуст.")
     sys.exit(1)
@@ -175,12 +180,8 @@ for entry in feed.entries:
 
     soup = BeautifulSoup(raw_html, "html.parser")
 
-    # ===== DRAW.IO IFRAME SUPPORT В ЦИКЛЕ =====
-    for iframe in soup.find_all("iframe"):
-        link_md = extract_drawio_link_markdown(iframe)
-        if link_md:
-            iframe.replace_with(link_md)
-            print(f"🔗 Draw.io link added: {slug}")
+    # 🔥 обработка iframe (viewer.diagrams.net и др.)
+    process_iframes(soup, url)
 
     image_index = {}
     index_path = article_cache / ".images.json"
@@ -313,7 +314,3 @@ print(f"         папок кеша: {stats['cache_removed']}")
 print(f"         категорий: {stats['categories_removed']}")
 
 print("\n✅ Готово.")
-
-# ===== Запуск теста Draw.io =====
-if __name__ == "__main__":
-    test_drawio_extraction()
