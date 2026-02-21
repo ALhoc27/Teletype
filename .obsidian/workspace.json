@@ -1,0 +1,232 @@
+{
+  "main": {
+    "id": "86939acaabc32312",
+    "type": "split",
+    "children": [
+      {
+        "id": "24baffeacc1ca7d3",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "0c7341d93b0a686a",
+            "type": "leaf",
+            "state": {
+              "type": "empty",
+              "state": {},
+              "icon": "lucide-file",
+              "title": "Новая вкладка"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "2ca7c2d3ce46c7bd",
+    "type": "split",
+    "children": [
+      {
+        "id": "2ae6a4b47b5051a5",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "d4323fffde76c2c8",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false
+              },
+              "icon": "lucide-folder-closed",
+              "title": "Файловый менеджер"
+            }
+          },
+          {
+            "id": "ec64956d4cd261ba",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "амама",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "Поиск"
+            }
+          },
+          {
+            "id": "3df16963d8119507",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {},
+              "icon": "lucide-bookmark",
+              "title": "Закладки"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300
+  },
+  "right": {
+    "id": "d7f11d44bb7901ee",
+    "type": "split",
+    "children": [
+      {
+        "id": "4bdef13bfc50f909",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "4a992bb2c83dba49",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "file": "mac_os/Как полностью удалить приложение (удалить).md",
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "Обратные ссылки для Как полностью удалить приложение (удалить)"
+            }
+          },
+          {
+            "id": "fa51cffe34a21c41",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "file": "mac_os/Как полностью удалить приложение (удалить).md",
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "Исходящие ссылки из Как полностью удалить приложение (удалить)"
+            }
+          },
+          {
+            "id": "39b8c7b956857c80",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "Теги"
+            }
+          },
+          {
+            "id": "34630849bf032599",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "Все свойства"
+            }
+          },
+          {
+            "id": "b603fb2e67a9827e",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "file": "mac_os/Как полностью удалить приложение (удалить).md",
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "Структура Как полностью удалить приложение (удалить)"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:Меню быстрого перехода": false,
+      "graph:Граф": false,
+      "canvas:Создать новый холст": false,
+      "daily-notes:Сегодняшняя заметка": false,
+      "templates:Вставить шаблон": false,
+      "command-palette:Открыть палитру команд": false,
+      "bases:Создать новую базу": false,
+      "omnisearch:Omnisearch": false
+    }
+  },
+  "active": "d4323fffde76c2c8",
+  "lastOpenFiles": [
+    "Teletype_0x/Cach/уауа/a4a339fe-77a9-464c-9f39-0aa538dc8ccf.png",
+    "misc/уауа.md",
+    "Teletype_0x/Cach/уауа/b94eb7d1-34d5-4ced-bfc6-221d0036db6c.png",
+    "Teletype_0x/Cach/уауа/a3b78802-ac7d-4b2d-976a-4225d7be3976.jpeg",
+    "Teletype_0x/Cach/уауа",
+    "misc",
+    "Teletype_0x/Cach/вым",
+    "windows/вым.md",
+    "Teletype_0x/Cach/кмммммм/a3b78802-ac7d-4b2d-976a-4225d7be3976.jpeg",
+    "windows/аыпкк.md",
+    "Teletype_0x/Cach/аыпкк/b94eb7d1-34d5-4ced-bfc6-221d0036db6c.png",
+    "Teletype_0x/Cach/аыпкк",
+    "mac_os/медвед мак.md",
+    "Teletype_0x/Cach/медвед мак/41475b50-2861-4d73-b365-4a7ec70e524f.png",
+    "Teletype_0x/Cach/медвед мак",
+    "Teletype_0x/Cach/ааа пошел наху",
+    "misc/ааа пошел наху.md",
+    "настройки/приве улаааааа 1111111111111.md",
+    "Teletype_0x/Cach/приве улаааааа 1111111111111/1e288b0d-c58d-4b13-a77c-e23c9b033363.png",
+    "Teletype_0x/Cach/приве улаааааа 1111111111111/b94eb7d1-34d5-4ced-bfc6-221d0036db6c.png",
+    "Teletype_0x/Cach/приве улаааааа 1111111111111",
+    "windows/уляяяяя ляяя ляяяявмыымы.md",
+    "Teletype_0x/Cach/уляяяяя ляяя ляяяявмыымы/1e1d12ba-05cb-47f5-b406-a578f0a0e947.png",
+    "Teletype_0x/Cach/уляяяяя ляяя ляяяявмыымы",
+    "Teletype_0x/Cach/332232",
+    "misc/332232.md",
+    "misc/11.md",
+    "misc/ааа.md",
+    "windows/Diskpart (дисковая утилита) (программа для диска) (дискпарт).md",
+    "Teletype_0x/Cach/11/e1549a30-e5e4-4f6f-97ab-d8749b532209.png",
+    "Teletype_0x/Cach/ааа",
+    "настройки/приве.md",
+    "Teletype_0x/Cach/приве/b94eb7d1-34d5-4ced-bfc6-221d0036db6c.png",
+    "hidden/AiCloud (Cloud Disk) (флешка роутер).md",
+    "mac_os/какака.md",
+    "misc/234234.md",
+    "windows/сук.md",
+    "mac_os/мак.md",
+    "misc/ffffffff.md",
+    "misc/2e.md",
+    "misc/привет барсукииииии.md",
+    "windows/1212112.md",
+    "настройки/УЛЯЛЯЛЯ.md",
+    "misc/привет барсук.md",
+    "misc/привет.md",
+    "misc/1231312313.md"
+  ]
+}
