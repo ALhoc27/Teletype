@@ -11,10 +11,14 @@
             "id": "0c7341d93b0a686a",
             "type": "leaf",
             "state": {
-              "type": "empty",
-              "state": {},
+              "type": "markdown",
+              "state": {
+                "file": "misc/Терминал и Finder (Команды 1).md",
+                "mode": "source",
+                "source": false
+              },
               "icon": "lucide-file",
-              "title": "Новая вкладка"
+              "title": "Терминал и Finder (Команды 1)"
             }
           }
         ]
@@ -180,7 +184,7 @@
       "omnisearch:Omnisearch": false
     }
   },
-  "active": "d4323fffde76c2c8",
+  "active": "0c7341d93b0a686a",
   "lastOpenFiles": [
     "Teletype_0x/Cach/уауа/a4a339fe-77a9-464c-9f39-0aa538dc8ccf.png",
     "misc/уауа.md",

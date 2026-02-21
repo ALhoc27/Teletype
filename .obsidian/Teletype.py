@@ -78,7 +78,7 @@ def normalize_md(text: str) -> str:
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip() + "\n"
 
-def extract_drawio_svg_base64(iframe_tag):
+def extract_drawio_svg_from_iframe_tag(iframe_tag):
     import urllib.parse, zlib, base64
     from bs4 import BeautifulSoup
 
@@ -88,31 +88,36 @@ def extract_drawio_svg_base64(iframe_tag):
 
     parsed = urllib.parse.urlparse(src)
     fragment = parsed.fragment
-    if not fragment or not fragment.startswith("R"):
+    if not fragment.startswith("R"):
         return None
 
     try:
+        # убираем "R" и декодируем URL
         data = urllib.parse.unquote(fragment[1:])
-        soup_xml = BeautifulSoup(data, "xml")
-        diagram = soup_xml.find("diagram")
-        if not diagram or not diagram.text.strip():
+        # разбираем как XML
+        soup = BeautifulSoup(data, "xml")
+        diagram_tag = soup.find("diagram")
+        if not diagram_tag or not diagram_tag.text.strip():
             return None
 
-        content = diagram.text.strip()
+        content = diagram_tag.text.strip()
 
-        # base64 decode
-        decoded = base64.b64decode(content)
-
-        # попытка распаковать deflate
+        # Draw.io диаграммы обычно в base64 + deflate
         try:
-            svg_text = zlib.decompress(decoded, -15).decode("utf-8")
+            decoded = base64.b64decode(content)
+            try:
+                svg = zlib.decompress(decoded, -15).decode("utf-8")
+            except:
+                svg = decoded.decode("utf-8")
         except:
-            svg_text = decoded.decode("utf-8")
+            svg = content
 
-        if "<svg" not in svg_text:
+        if "<svg" not in svg:
+            # если это raw XML, пробуем заменить mxfile -> svg (редко)
             return None
 
-        svg_b64 = base64.b64encode(svg_text.encode("utf-8")).decode("utf-8")
+        # преобразуем в inline base64 для markdown
+        svg_b64 = base64.b64encode(svg.encode("utf-8")).decode("utf-8")
         return f"data:image/svg+xml;base64,{svg_b64}"
 
     except Exception as e:
