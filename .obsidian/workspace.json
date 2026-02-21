@@ -11,10 +11,14 @@
             "id": "ce02e1615ff55a7d",
             "type": "leaf",
             "state": {
-              "type": "empty",
-              "state": {},
+              "type": "markdown",
+              "state": {
+                "file": "misc/Терминал и Finder (Команды 1).md",
+                "mode": "preview",
+                "source": false
+              },
               "icon": "lucide-file",
-              "title": "Новая вкладка"
+              "title": "Терминал и Finder (Команды 1)"
             }
           }
         ]
