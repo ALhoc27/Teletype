@@ -10,12 +10,14 @@ import re
 import sys
 import hashlib
 import shutil
+import base64
+import zlib
+import urllib.parse
 
 # ================= НАСТРОЙКИ =================
 
 RSS_URL = "https://teletype.in/rss/bearsocietatis"
 
-# Teletype/.obsidian/Teletype.py
 VAULT_ROOT = Path(__file__).resolve().parent.parent
 CACHE_ROOT = VAULT_ROOT / "Teletype_0x" / "Cach"
 
@@ -78,10 +80,9 @@ def normalize_md(text: str) -> str:
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip() + "\n"
 
-def extract_drawio_svg_from_iframe_tag(iframe_tag):
-    import urllib.parse, zlib, base64
-    from bs4 import BeautifulSoup
+# ================ DRAW.IO SUPPORT =================
 
+def extract_drawio_svg_from_iframe(iframe_tag):
     src = iframe_tag.get("src")
     if not src:
         return None
@@ -91,38 +92,25 @@ def extract_drawio_svg_from_iframe_tag(iframe_tag):
     if not fragment.startswith("R"):
         return None
 
+    data = urllib.parse.unquote(fragment[1:])
+
+    # Попытка декодирования Base64 + deflate
     try:
-        # убираем "R" и декодируем URL
-        data = urllib.parse.unquote(fragment[1:])
-        # разбираем как XML
-        soup = BeautifulSoup(data, "xml")
-        diagram_tag = soup.find("diagram")
-        if not diagram_tag or not diagram_tag.text.strip():
-            return None
-
-        content = diagram_tag.text.strip()
-
-        # Draw.io диаграммы обычно в base64 + deflate
+        decoded = base64.b64decode(data)
         try:
-            decoded = base64.b64decode(content)
-            try:
-                svg = zlib.decompress(decoded, -15).decode("utf-8")
-            except:
-                svg = decoded.decode("utf-8")
+            xml = zlib.decompress(decoded, -15).decode("utf-8")
         except:
-            svg = content
+            xml = decoded.decode("utf-8")
+    except:
+        xml = data
 
-        if "<svg" not in svg:
-            # если это raw XML, пробуем заменить mxfile -> svg (редко)
-            return None
-
-        # преобразуем в inline base64 для markdown
-        svg_b64 = base64.b64encode(svg.encode("utf-8")).decode("utf-8")
-        return f"data:image/svg+xml;base64,{svg_b64}"
-
-    except Exception as e:
-        print("DRAWIO ERROR:", e)
+    if "<mxfile" not in xml:
         return None
+
+    # Генерируем простой inline SVG контейнер для Obsidian
+    svg = f'<svg xmlns="http://www.w3.org/2000/svg"><text x="0" y="15" font-family="Arial" font-size="12">{xml[:80]}...</text></svg>'
+    svg_b64 = base64.b64encode(svg.encode("utf-8")).decode("utf-8")
+    return f"![](data:image/svg+xml;base64,{svg_b64})"
 
 # ================= RSS =======================
 
@@ -198,11 +186,12 @@ for entry in feed.entries:
         continue
 
     soup = BeautifulSoup(raw_html, "html.parser")
+
     # ===== DRAW.IO IFRAME SUPPORT =====
     for iframe in soup.find_all("iframe"):
-        svg_data = extract_drawio_svg_base64(iframe)
+        svg_data = extract_drawio_svg_from_iframe(iframe)
         if svg_data:
-            iframe.replace_with(f"![]({svg_data})")
+            iframe.replace_with(svg_data)
             stats["images_downloaded"] += 1
             print(f"⬇ SVG inline: {slug}")
 
