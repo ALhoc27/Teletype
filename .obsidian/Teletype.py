@@ -80,17 +80,32 @@ def normalize_md(text: str) -> str:
 
 # ================= IFRAME PROCESSING ===================
 
-def process_iframes(soup: BeautifulSoup, base_url: str):
-    for iframe in soup.find_all("iframe"):
-        src = iframe.get("src")
-        if not src:
+def process_iframes(soup: BeautifulSoup, article_url: str):
+    # загружаем оригинальную страницу
+    try:
+        r = session.get(article_url, timeout=20)
+        if r.status_code != 200:
+            return
+    except:
+        return
+
+    page_soup = BeautifulSoup(r.text, "html.parser")
+    real_iframes = page_soup.find_all("iframe")
+
+    if not real_iframes:
+        return
+
+    real_sources = [iframe.get("src") for iframe in real_iframes if iframe.get("src")]
+
+    rss_iframes = soup.find_all("iframe")
+
+    for i, iframe in enumerate(rss_iframes):
+        if i < len(real_sources):
+            iframe_url = urljoin(article_url, real_sources[i])
+            replacement = f"\n\n[Открыть диаграмму]({iframe_url})\n\n"
+            iframe.replace_with(replacement)
+        else:
             iframe.decompose()
-            continue
-
-        iframe_url = urljoin(base_url, src)
-
-        replacement = f"\n\n[Открыть диаграмму]({iframe_url})\n\n"
-        iframe.replace_with(replacement)
 
 # ================= RSS =======================
 
