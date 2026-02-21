@@ -10,7 +10,8 @@ import re
 import sys
 import hashlib
 import shutil
-from playwright.sync_api import (sync_playwright)
+import asyncio
+from playwright.async_api import async_playwright
 
 # ================= НАСТРОЙКИ =================
 
@@ -57,16 +58,21 @@ playwright_instance = None
 browser_instance = None
 
 
+playwright_instance = None
+browser_instance = None
+context_instance = None
+
 def get_browser():
-    global playwright_instance, browser_instance
+    global playwright_instance, browser_instance, context_instance
 
     if browser_instance:
-        return browser_instance
+        return browser_instance, context_instance
 
     playwright_instance = sync_playwright().start()
     browser_instance = playwright_instance.chromium.launch(headless=True)
+    context_instance = browser_instance.new_context()
 
-    return browser_instance
+    return browser_instance, context_instance
 
 
 def close_browser():
@@ -97,35 +103,40 @@ def create_placeholder(img_path: Path, url: str):
     stats["images_downloaded"] += 1
     print(f"⬇ IMG (placeholder): {img_path.name}")
 
-def export_drawio_via_svg(url: str, img_path: Path):
-    """Экспорт диаграммы diagrams.net через SVG screenshot (ускоренная версия)"""
+def export_drawio_via_svg(page, url: str, img_path: Path):
+    """Экспорт diagrams.net через SVG screenshot с hash-проверкой"""
 
-    browser = get_browser()
-    page = browser.new_page(viewport={"width": 2000, "height": 1500})
+    page.goto(url, timeout=60000)
+    page.wait_for_timeout(4000)
 
-    try:
-        page.goto(url)
-        page.wait_for_timeout(4000)
+    svg_element = None
+    for frame in page.frames:
+        svgs = frame.query_selector_all("svg")
+        if svgs:
+            svg_element = svgs[0]
+            break
 
-        svg_element = None
+    if not svg_element:
+        raise Exception("SVG не найден")
 
-        for frame in page.frames:
-            svgs = frame.query_selector_all("svg")
-            if svgs:
-                svg_element = svgs[0]
-                break
+    box = svg_element.bounding_box()
+    if not box:
+        raise Exception("Bounding box не найден")
 
-        if not svg_element:
-            raise Exception("SVG не найден")
+    tmp_path = img_path.with_suffix(".tmp.png")
 
-        box = svg_element.bounding_box()
+    page.screenshot(path=str(tmp_path), clip=box)
 
-        page.screenshot(path=str(img_path), clip=box)
+    new_hash = file_sha(tmp_path)
+    old_hash = file_sha(img_path)
 
-        print(f"⬇ IMG: {img_path.name}")
-
-    finally:
-        page.close()
+    if new_hash != old_hash:
+        tmp_path.replace(img_path)
+        print(f"⬇ IMG updated: {img_path.name}")
+        stats["images_downloaded"] += 1
+    else:
+        tmp_path.unlink()
+        print(f"✓ IMG unchanged: {img_path.name}")
 
 def process_iframes(soup: BeautifulSoup, article_url: str, slug: str, current_used: set):
     """Обработка iframe, создание мини-изображений диаграмм"""
@@ -156,12 +167,17 @@ def process_iframes(soup: BeautifulSoup, article_url: str, slug: str, current_us
         img_name = f"iframe_{i+1}.png"
         img_path = article_cache / img_name
 
-        if not img_path.exists():
+        if True:
             parsed = urlparse(iframe_url)
             if "draw.io" in parsed.netloc or "diagrams.net" in parsed.netloc:
                 try:
-                    export_drawio_via_svg(iframe_url, img_path)
-                    stats["images_downloaded"] += 1
+                    browser, context = get_browser()
+                    page = context.new_page()
+
+                    try:
+                        export_drawio_via_svg(page, iframe_url, img_path)
+                    finally:
+                        page.close()
                 except Exception as e:
                     print("Export error:", e)
                     create_placeholder(img_path, iframe_url)
@@ -190,6 +206,11 @@ def normalize_image_name(name: str) -> str:
 
 def sha(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+def file_sha(path: Path) -> str:
+    if not path.exists():
+        return ""
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 def normalize_html_for_hash(html: str) -> str:
     soup = BeautifulSoup(html, "html.parser")
@@ -269,6 +290,20 @@ for entry in feed.entries:
 
     raw_html = entry.get("content", [{}])[0].get("value", "")
     html_hash = sha(normalize_html_for_hash(raw_html))
+
+    # 🔥 добавляем hash iframe src из реальной страницы
+    try:
+        r = session.get(url, timeout=20)
+        if r.status_code == 200:
+            page_soup = BeautifulSoup(r.text, "html.parser")
+            iframe_srcs = sorted(
+                iframe.get("src", "")
+                for iframe in page_soup.find_all("iframe")
+            )
+            iframe_hash = sha("".join(iframe_srcs))
+            html_hash = sha(html_hash + iframe_hash)
+    except:
+        pass
 
     article_cache = CACHE_ROOT / slug
     hash_path = article_cache / ".content.hash"
