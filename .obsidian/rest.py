@@ -1,27 +1,19 @@
 #!/usr/bin/env python3
 import base64
 import zlib
-import urllib.parse
-import urllib.request
 import json
 from pathlib import Path
+from urllib.parse import urlparse, unquote
+import urllib.request
 
 # =========================
 # ВСТАВЬ ССЫЛКУ СЮДА
 # =========================
-URL = """"""
+URL = """ВСТАВЬ_СЮДА_ПОЛНУЮ_ССЫЛКУ"""
 OUTPUT_FILE = "diagram.svg"
 # =========================
 
-
 EXPORT_URL = "https://convert.diagrams.net/export"
-
-
-from urllib.parse import urlparse, unquote
-
-
-from urllib.parse import urlparse, unquote
-import urllib.request
 
 
 def extract_mxfile_from_url(url: str) -> str:
@@ -34,10 +26,7 @@ def extract_mxfile_from_url(url: str) -> str:
 
     # 🔹 Формат #R (встроенная диаграмма)
     if fragment.startswith("R"):
-        data = fragment[1:]
-        data = unquote(data)
-
-        import base64, zlib
+        data = unquote(fragment[1:])
 
         missing_padding = len(data) % 4
         if missing_padding:
@@ -57,7 +46,12 @@ def extract_mxfile_from_url(url: str) -> str:
         external_url = unquote(fragment[1:])
         print("Найдена внешняя ссылка:", external_url)
 
-        with urllib.request.urlopen(external_url) as response:
+        request = urllib.request.Request(
+            external_url,
+            headers={"User-Agent": "Mozilla/5.0"}
+        )
+
+        with urllib.request.urlopen(request) as response:
             return response.read().decode("utf-8")
 
     else:
@@ -76,7 +70,10 @@ def export_svg(mxfile_xml: str) -> bytes:
     request = urllib.request.Request(
         EXPORT_URL,
         data=data,
-        headers={"Content-Type": "application/json"}
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0"
+        }
     )
 
     with urllib.request.urlopen(request) as response:
@@ -84,6 +81,9 @@ def export_svg(mxfile_xml: str) -> bytes:
 
 
 def main():
+    if not URL.strip():
+        raise ValueError("Ты не вставил ссылку в переменную URL.")
+
     print("Извлечение mxfile из ссылки...")
     mxfile = extract_mxfile_from_url(URL)
 
