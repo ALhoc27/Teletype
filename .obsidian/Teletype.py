@@ -52,39 +52,37 @@ stats = {
     "categories_removed": 0,
 }
 
-# ================= PLAYWRIGHT SESSION =====================
-
-playwright_instance = None
-browser_instance = None
-
+# ================= PLAYWRIGHT SESSION (ASYNC) =====================
 
 playwright_instance = None
 browser_instance = None
 context_instance = None
 
-def get_browser():
+
+async def get_browser():
     global playwright_instance, browser_instance, context_instance
 
     if browser_instance:
         return browser_instance, context_instance
 
-    playwright_instance = sync_playwright().start()
-    browser_instance = playwright_instance.chromium.launch(headless=True)
-    context_instance = browser_instance.new_context()
+    playwright_instance = await async_playwright().start()
+    browser_instance = await playwright_instance.chromium.launch(headless=True)
+    context_instance = await browser_instance.new_context(
+        viewport={"width": 2000, "height": 1500},
+        device_scale_factor=3
+    )
 
     return browser_instance, context_instance
 
 
-def close_browser():
+async def close_browser():
     global playwright_instance, browser_instance
 
     if browser_instance:
-        browser_instance.close()
-        browser_instance = None
+        await browser_instance.close()
 
     if playwright_instance:
-        playwright_instance.stop()
-        playwright_instance = None
+        await playwright_instance.stop()
 
 # ================= IFRAME IMAGE EXPORT ===================
 from PIL import Image, ImageDraw, ImageFont
@@ -103,43 +101,51 @@ def create_placeholder(img_path: Path, url: str):
     stats["images_downloaded"] += 1
     print(f"⬇ IMG (placeholder): {img_path.name}")
 
-def export_drawio_via_svg(page, url: str, img_path: Path):
-    """Экспорт diagrams.net через SVG screenshot с hash-проверкой"""
+async def export_drawio_via_svg(context, url: str, img_path: Path):
+    """Async экспорт diagrams.net с hash-проверкой"""
 
-    page.goto(url, timeout=60000)
-    page.wait_for_timeout(4000)
+    page = await context.new_page()
 
-    svg_element = None
-    for frame in page.frames:
-        svgs = frame.query_selector_all("svg")
-        if svgs:
-            svg_element = svgs[0]
-            break
+    try:
+        await page.goto(url, timeout=60000)
+        await page.wait_for_timeout(3000)
 
-    if not svg_element:
-        raise Exception("SVG не найден")
+        svg_element = None
 
-    box = svg_element.bounding_box()
-    if not box:
-        raise Exception("Bounding box не найден")
+        for frame in page.frames:
+            svgs = await frame.query_selector_all("svg")
+            if svgs:
+                svg_element = svgs[0]
+                break
 
-    tmp_path = img_path.with_suffix(".tmp.png")
+        if not svg_element:
+            raise Exception("SVG не найден")
 
-    page.screenshot(path=str(tmp_path), clip=box)
+        box = await svg_element.bounding_box()
+        if not box:
+            raise Exception("Bounding box не найден")
 
-    new_hash = file_sha(tmp_path)
-    old_hash = file_sha(img_path)
+        tmp_path = img_path.with_suffix(".tmp.png")
 
-    if new_hash != old_hash:
-        tmp_path.replace(img_path)
-        print(f"⬇ IMG updated: {img_path.name}")
-        stats["images_downloaded"] += 1
-    else:
-        tmp_path.unlink()
-        print(f"✓ IMG unchanged: {img_path.name}")
+        await page.screenshot(path=str(tmp_path), clip=box)
 
-def process_iframes(soup: BeautifulSoup, article_url: str, slug: str, current_used: set):
-    """Обработка iframe, создание мини-изображений диаграмм"""
+        new_hash = file_sha(tmp_path)
+        old_hash = file_sha(img_path)
+
+        if new_hash != old_hash:
+            tmp_path.replace(img_path)
+            print(f"⬇ IMG updated: {img_path.name}")
+            stats["images_downloaded"] += 1
+        else:
+            tmp_path.unlink()
+            print(f"✓ IMG unchanged: {img_path.name}")
+
+    finally:
+        await page.close()
+
+async def process_iframes(soup: BeautifulSoup, article_url: str, slug: str, current_used: set):
+    """Async обработка iframe"""
+
     try:
         r = session.get(article_url, timeout=20)
         if r.status_code != 200:
@@ -158,6 +164,10 @@ def process_iframes(soup: BeautifulSoup, article_url: str, slug: str, current_us
     article_cache = CACHE_ROOT / slug
     article_cache.mkdir(parents=True, exist_ok=True)
 
+    _, context = await get_browser()
+
+    tasks = []
+
     for i, iframe in enumerate(rss_iframes):
         if i >= len(real_sources):
             iframe.decompose()
@@ -167,27 +177,20 @@ def process_iframes(soup: BeautifulSoup, article_url: str, slug: str, current_us
         img_name = f"iframe_{i+1}.png"
         img_path = article_cache / img_name
 
-        if True:
-            parsed = urlparse(iframe_url)
-            if "draw.io" in parsed.netloc or "diagrams.net" in parsed.netloc:
-                try:
-                    browser, context = get_browser()
-                    page = context.new_page()
+        parsed = urlparse(iframe_url)
 
-                    try:
-                        export_drawio_via_svg(page, iframe_url, img_path)
-                    finally:
-                        page.close()
-                except Exception as e:
-                    print("Export error:", e)
-                    create_placeholder(img_path, iframe_url)
+        if "draw.io" in parsed.netloc or "diagrams.net" in parsed.netloc:
+            tasks.append(
+                export_drawio_via_svg(context, iframe_url, img_path)
+            )
 
-        # ✅ Добавляем в current_used, чтобы placeholder не удалялся
         current_used.add(img_name)
 
-        # вставка в Markdown: картинка + ссылка
         replacement = f"![[Teletype_0x/Cach/{slug}/{img_name}]]\n\n[Открыть диаграмму]({iframe_url})\n\n"
         iframe.replace_with(replacement)
+
+    if tasks:
+        await asyncio.gather(*tasks)
 
 # ================= HELPERS ===================
 
@@ -225,237 +228,240 @@ def normalize_md(text: str) -> str:
 # ================= IFRAME PROCESSING ===================
 
 
+async def main():
+    # ================= RSS =======================
 
-# ================= RSS =======================
+    feed = feedparser.parse(RSS_URL, sanitize_html=False)
+    if not feed.entries:
+        print("❌ RSS пуст.")
+        sys.exit(1)
 
-feed = feedparser.parse(RSS_URL, sanitize_html=False)
-if not feed.entries:
-    print("❌ RSS пуст.")
-    sys.exit(1)
+    current_map = {e.link: safe_filename(e.title.strip()) for e in feed.entries}
+    current_urls = set(current_map.keys())
+    all_titles = [e.title.strip() for e in feed.entries]
 
-current_map = {e.link: safe_filename(e.title.strip()) for e in feed.entries}
-current_urls = set(current_map.keys())
-all_titles = [e.title.strip() for e in feed.entries]
+    # ================= LOAD PREVIOUS STATE =======
 
-# ================= LOAD PREVIOUS STATE =======
+    previous_map = {}
+    if RSS_STATE_PATH.exists():
+        previous_map = json.loads(RSS_STATE_PATH.read_text("utf-8"))
 
-previous_map = {}
-if RSS_STATE_PATH.exists():
-    previous_map = json.loads(RSS_STATE_PATH.read_text("utf-8"))
+    previous_urls = set(previous_map.keys())
 
-previous_urls = set(previous_map.keys())
+    # ================= DELETE REMOVED ARTICLES ====
 
-# ================= DELETE REMOVED ARTICLES ====
+    for url in previous_urls - current_urls:
+        slug = previous_map[url]
 
-for url in previous_urls - current_urls:
-    slug = previous_map[url]
+        print(f"🗑 REMOVE: {slug}")
 
-    print(f"🗑 REMOVE: {slug}")
+        for md_file in VAULT_ROOT.rglob(f"{slug}.md"):
+            md_file.unlink()
 
-    for md_file in VAULT_ROOT.rglob(f"{slug}.md"):
-        md_file.unlink()
+        cache_dir = CACHE_ROOT / slug
+        if cache_dir.exists():
+            for f in cache_dir.iterdir():
+                if f.suffix.lower() in IMAGE_EXTS:
+                    print(f"🗑 IMG: {slug}/{f.name}")
+                    stats["images_removed"] += 1
+            shutil.rmtree(cache_dir)
 
-    cache_dir = CACHE_ROOT / slug
-    if cache_dir.exists():
-        for f in cache_dir.iterdir():
-            if f.suffix.lower() in IMAGE_EXTS:
-                print(f"🗑 IMG: {slug}/{f.name}")
-                stats["images_removed"] += 1
-        shutil.rmtree(cache_dir)
+        stats["articles_removed"] += 1
 
-    stats["articles_removed"] += 1
+    # ================= LOAD USED IMAGES STATE ====
 
-# ================= LOAD USED IMAGES STATE ====
+    used_images = {}
+    if USED_IMAGES_PATH.exists():
+        used_images = {
+            k: set(v)
+            for k, v in json.loads(USED_IMAGES_PATH.read_text("utf-8")).items()
+        }
 
-used_images = {}
-if USED_IMAGES_PATH.exists():
-    used_images = {
-        k: set(v)
-        for k, v in json.loads(USED_IMAGES_PATH.read_text("utf-8")).items()
-    }
+    # ================= IMPORT ====================
 
-# ================= IMPORT ====================
+    for entry in feed.entries:
+        url = entry.link
+        title = entry.title.strip()
+        slug = safe_filename(title)
 
-for entry in feed.entries:
-    url = entry.link
-    title = entry.title.strip()
-    slug = safe_filename(title)
+        category = normalize_tag(entry.get("category", "misc"))
+        article_dir = VAULT_ROOT / category
+        article_dir.mkdir(parents=True, exist_ok=True)
 
-    category = normalize_tag(entry.get("category", "misc"))
-    article_dir = VAULT_ROOT / category
-    article_dir.mkdir(parents=True, exist_ok=True)
+        md_path = article_dir / f"{slug}.md"
+        is_new = not md_path.exists()
 
-    md_path = article_dir / f"{slug}.md"
-    is_new = not md_path.exists()
+        raw_html = entry.get("content", [{}])[0].get("value", "")
+        html_hash = sha(normalize_html_for_hash(raw_html))
 
-    raw_html = entry.get("content", [{}])[0].get("value", "")
-    html_hash = sha(normalize_html_for_hash(raw_html))
+        # 🔥 добавляем hash iframe src из реальной страницы
+        try:
+            r = session.get(url, timeout=20)
+            if r.status_code == 200:
+                page_soup = BeautifulSoup(r.text, "html.parser")
+                iframe_srcs = sorted(
+                    iframe.get("src", "")
+                    for iframe in page_soup.find_all("iframe")
+                )
+                iframe_hash = sha("".join(iframe_srcs))
+                html_hash = sha(html_hash + iframe_hash)
+        except:
+            pass
 
-    # 🔥 добавляем hash iframe src из реальной страницы
-    try:
-        r = session.get(url, timeout=20)
-        if r.status_code == 200:
-            page_soup = BeautifulSoup(r.text, "html.parser")
-            iframe_srcs = sorted(
-                iframe.get("src", "")
-                for iframe in page_soup.find_all("iframe")
-            )
-            iframe_hash = sha("".join(iframe_srcs))
-            html_hash = sha(html_hash + iframe_hash)
-    except:
-        pass
+        article_cache = CACHE_ROOT / slug
+        hash_path = article_cache / ".content.hash"
+        old_hash = hash_path.read_text("utf-8") if hash_path.exists() else None
 
-    article_cache = CACHE_ROOT / slug
-    hash_path = article_cache / ".content.hash"
-    old_hash = hash_path.read_text("utf-8") if hash_path.exists() else None
-
-    if md_path.exists() and old_hash == html_hash:
-        stats["articles_unchanged"] += 1
-        continue
-
-    soup = BeautifulSoup(raw_html, "html.parser")
-
-    # 🔥 обработка iframe (viewer.diagrams.net и др.)
-    current_used = set()
-    process_iframes(soup, url, slug, current_used)
-
-    image_index = {}
-    index_path = article_cache / ".images.json"
-    if index_path.exists():
-        image_index = json.loads(index_path.read_text("utf-8"))
-
-    has_images = False
-
-    for img in soup.find_all("img"):
-        src = img.get("src")
-        if not src:
+        if md_path.exists() and old_hash == html_hash:
+            stats["articles_unchanged"] += 1
             continue
 
-        has_images = True
-        article_cache.mkdir(parents=True, exist_ok=True)
+        soup = BeautifulSoup(raw_html, "html.parser")
 
-        img_url = urljoin(url, src)
-        raw = Path(urlparse(img_url).path).name or "image"
-        img_name = normalize_image_name(raw)
+        # 🔥 обработка iframe (viewer.diagrams.net и др.)
+        current_used = set()
+        await process_iframes(soup, url, slug, current_used)
 
-        if img_url not in image_index:
-            r = session.get(img_url, timeout=20)
-            if r.status_code == 200:
-                (article_cache / img_name).write_bytes(r.content)
-                image_index[img_url] = img_name
-                stats["images_downloaded"] += 1
-                print(f"⬇ IMG: {slug}/{img_name}")
+        image_index = {}
+        index_path = article_cache / ".images.json"
+        if index_path.exists():
+            image_index = json.loads(index_path.read_text("utf-8"))
 
-        current_used.add(image_index[img_url])
-        img.replace_with(f"OBSIDIAN_IMAGE::{slug}/{image_index[img_url]}")
+        has_images = False
 
-    if has_images:
-        index_path.write_text(json.dumps(image_index, indent=2), "utf-8")
-        used_images[slug] = current_used
-
-    if is_new:
-        for text in soup.find_all(string=True):
-            if not isinstance(text, NavigableString):
+        for img in soup.find_all("img"):
+            src = img.get("src")
+            if not src:
                 continue
-            s = str(text)
-            for t in all_titles:
-                if t != title:
-                    s = re.sub(rf'(?<!\[\[){re.escape(t)}(?!\]\])', f"[[{t}]]", s)
-            if s != text:
-                text.replace_with(s)
 
-    content_md = md(str(soup), heading_style="ATX")
-    # нормализуем путь для Obsidian: убираем \_ и все \ в пути
-    content_md = md(str(soup), heading_style="ATX")
+            has_images = True
+            article_cache.mkdir(parents=True, exist_ok=True)
 
-    content_md = re.sub(
-        r"OBSIDIAN\\?_IMAGE::([^\n]+)",
-        r"![[Teletype_0x/Cach/\1]]",
-        content_md
+            img_url = urljoin(url, src)
+            raw = Path(urlparse(img_url).path).name or "image"
+            img_name = normalize_image_name(raw)
+
+            if img_url not in image_index:
+                r = session.get(img_url, timeout=20)
+                if r.status_code == 200:
+                    (article_cache / img_name).write_bytes(r.content)
+                    image_index[img_url] = img_name
+                    stats["images_downloaded"] += 1
+                    print(f"⬇ IMG: {slug}/{img_name}")
+
+            current_used.add(image_index[img_url])
+            img.replace_with(f"OBSIDIAN_IMAGE::{slug}/{image_index[img_url]}")
+
+        if has_images:
+            index_path.write_text(json.dumps(image_index, indent=2), "utf-8")
+            used_images[slug] = current_used
+
+        if is_new:
+            for text in soup.find_all(string=True):
+                if not isinstance(text, NavigableString):
+                    continue
+                s = str(text)
+                for t in all_titles:
+                    if t != title:
+                        s = re.sub(rf'(?<!\[\[){re.escape(t)}(?!\]\])', f"[[{t}]]", s)
+                if s != text:
+                    text.replace_with(s)
+
+        content_md = md(str(soup), heading_style="ATX")
+        # нормализуем путь для Obsidian: убираем \_ и все \ в пути
+        content_md = md(str(soup), heading_style="ATX")
+
+        content_md = re.sub(
+            r"OBSIDIAN\\?_IMAGE::([^\n]+)",
+            r"![[Teletype_0x/Cach/\1]]",
+            content_md
+        )
+
+        content_md = content_md.replace("\\_", "_")
+
+        created = ""
+        if entry.get("published_parsed"):
+            created = str(datetime(*entry.published_parsed[:6]).date())
+
+        updated = str(datetime.now().date())
+
+        frontmatter = f"""---
+    source: teletype
+    author: {AUTHOR}
+    url: {url}
+    created: {created}
+    updated: {updated}
+    ---
+    
+    """
+
+        md_path.write_text(frontmatter + normalize_md(content_md), "utf-8")
+
+        article_cache.mkdir(parents=True, exist_ok=True)
+        hash_path.write_text(html_hash, "utf-8")
+
+        if is_new:
+            print(f"➕ NEW: {slug}")
+            stats["articles_new"] += 1
+        else:
+            print(f"✏ UPDATE: {slug}")
+            stats["articles_updated"] += 1
+
+    # ================= IMAGE GC ==================
+
+    for slug, imgs in list(used_images.items()):
+        cache_dir = CACHE_ROOT / slug
+        if not cache_dir.exists():
+            continue
+
+        # Сравниваем по имени файла (для placeholder)
+        used_names = set(imgs)
+
+        for f in cache_dir.iterdir():
+            if f.suffix.lower() in IMAGE_EXTS and f.name not in used_names:
+                f.unlink()
+                print(f"🗑 IMG: {slug}/{f.name}")
+                stats["images_removed"] += 1
+
+        # Если после удаления нет файлов, удаляем папку
+        if not any(p.suffix.lower() in IMAGE_EXTS for p in cache_dir.iterdir()):
+            shutil.rmtree(cache_dir)
+            used_images.pop(slug, None)
+
+    # ================= CATEGORY GC ===============
+
+    for d in VAULT_ROOT.iterdir():
+        if not d.is_dir() or d.name.startswith(".") or d.name == "Teletype_0x":
+            continue
+        if not any(p.suffix == ".md" for p in d.rglob("*.md")):
+            shutil.rmtree(d)
+            stats["categories_removed"] += 1
+
+    # ================= SAVE STATE ================
+
+    RSS_STATE_PATH.write_text(json.dumps(current_map, indent=2), "utf-8")
+    USED_IMAGES_PATH.write_text(
+        json.dumps({k: sorted(v) for k, v in used_images.items()}, indent=2),
+        "utf-8"
     )
 
-    content_md = content_md.replace("\\_", "_")
+    # ================= SUMMARY ===================
 
-    created = ""
-    if entry.get("published_parsed"):
-        created = str(datetime(*entry.published_parsed[:6]).date())
+    print("\n🧾 Итог")
+    print(f"Всего статей в RSS: {len(current_urls)}")
+    print(
+        f"Импортированных: "
+        f"+{stats['articles_new']} (новые) / "
+        f"~{stats['articles_updated']} (обновлённые) / "
+        f"={stats['articles_unchanged']} (без изменений)"
+    )
+    print(f"Удалено: статей: {stats['articles_removed']}")
+    print(f"         изображений: {stats['images_removed']}")
+    print(f"         папок кеша: {stats['cache_removed']}")
+    print(f"         категорий: {stats['categories_removed']}")
 
-    updated = str(datetime.now().date())
+    await close_browser()
+    print("\n✅ Готово.")
 
-    frontmatter = f"""---
-source: teletype
-author: {AUTHOR}
-url: {url}
-created: {created}
-updated: {updated}
----
-
-"""
-
-    md_path.write_text(frontmatter + normalize_md(content_md), "utf-8")
-
-    article_cache.mkdir(parents=True, exist_ok=True)
-    hash_path.write_text(html_hash, "utf-8")
-
-    if is_new:
-        print(f"➕ NEW: {slug}")
-        stats["articles_new"] += 1
-    else:
-        print(f"✏ UPDATE: {slug}")
-        stats["articles_updated"] += 1
-
-# ================= IMAGE GC ==================
-
-for slug, imgs in list(used_images.items()):
-    cache_dir = CACHE_ROOT / slug
-    if not cache_dir.exists():
-        continue
-
-    # Сравниваем по имени файла (для placeholder)
-    used_names = set(imgs)
-
-    for f in cache_dir.iterdir():
-        if f.suffix.lower() in IMAGE_EXTS and f.name not in used_names:
-            f.unlink()
-            print(f"🗑 IMG: {slug}/{f.name}")
-            stats["images_removed"] += 1
-
-    # Если после удаления нет файлов, удаляем папку
-    if not any(p.suffix.lower() in IMAGE_EXTS for p in cache_dir.iterdir()):
-        shutil.rmtree(cache_dir)
-        used_images.pop(slug, None)
-
-# ================= CATEGORY GC ===============
-
-for d in VAULT_ROOT.iterdir():
-    if not d.is_dir() or d.name.startswith(".") or d.name == "Teletype_0x":
-        continue
-    if not any(p.suffix == ".md" for p in d.rglob("*.md")):
-        shutil.rmtree(d)
-        stats["categories_removed"] += 1
-
-# ================= SAVE STATE ================
-
-RSS_STATE_PATH.write_text(json.dumps(current_map, indent=2), "utf-8")
-USED_IMAGES_PATH.write_text(
-    json.dumps({k: sorted(v) for k, v in used_images.items()}, indent=2),
-    "utf-8"
-)
-
-# ================= SUMMARY ===================
-
-print("\n🧾 Итог")
-print(f"Всего статей в RSS: {len(current_urls)}")
-print(
-    f"Импортированных: "
-    f"+{stats['articles_new']} (новые) / "
-    f"~{stats['articles_updated']} (обновлённые) / "
-    f"={stats['articles_unchanged']} (без изменений)"
-)
-print(f"Удалено: статей: {stats['articles_removed']}")
-print(f"         изображений: {stats['images_removed']}")
-print(f"         папок кеша: {stats['cache_removed']}")
-print(f"         категорий: {stats['categories_removed']}")
-
-close_browser()
-print("\n✅ Готово.")
+if __name__ == "__main__":
+    asyncio.run(main())
