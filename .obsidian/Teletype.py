@@ -78,6 +78,47 @@ def normalize_md(text: str) -> str:
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip() + "\n"
 
+def extract_drawio_svg_base64(iframe_tag):
+    import urllib.parse, zlib, base64
+    from bs4 import BeautifulSoup
+
+    src = iframe_tag.get("src")
+    if not src:
+        return None
+
+    parsed = urllib.parse.urlparse(src)
+    fragment = parsed.fragment
+    if not fragment or not fragment.startswith("R"):
+        return None
+
+    try:
+        data = urllib.parse.unquote(fragment[1:])
+        soup_xml = BeautifulSoup(data, "xml")
+        diagram = soup_xml.find("diagram")
+        if not diagram or not diagram.text.strip():
+            return None
+
+        content = diagram.text.strip()
+
+        # base64 decode
+        decoded = base64.b64decode(content)
+
+        # попытка распаковать deflate
+        try:
+            svg_text = zlib.decompress(decoded, -15).decode("utf-8")
+        except:
+            svg_text = decoded.decode("utf-8")
+
+        if "<svg" not in svg_text:
+            return None
+
+        svg_b64 = base64.b64encode(svg_text.encode("utf-8")).decode("utf-8")
+        return f"data:image/svg+xml;base64,{svg_b64}"
+
+    except Exception as e:
+        print("DRAWIO ERROR:", e)
+        return None
+
 # ================= RSS =======================
 
 feed = feedparser.parse(RSS_URL)
@@ -152,6 +193,13 @@ for entry in feed.entries:
         continue
 
     soup = BeautifulSoup(raw_html, "html.parser")
+    # ===== DRAW.IO IFRAME SUPPORT =====
+    for iframe in soup.find_all("iframe"):
+        svg_data = extract_drawio_svg_base64(iframe)
+        if svg_data:
+            iframe.replace_with(f"![]({svg_data})")
+            stats["images_downloaded"] += 1
+            print(f"⬇ SVG inline: {slug}")
 
     image_index = {}
     index_path = article_cache / ".images.json"
