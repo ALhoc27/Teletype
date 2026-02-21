@@ -4,7 +4,7 @@ from bs4 import BeautifulSoup, NavigableString
 from markdownify import markdownify as md
 from pathlib import Path
 from datetime import datetime
-from urllib.parse import urljoin, urlparse, urlunparse, unquote
+from urllib.parse import urljoin, urlparse
 import json
 import re
 import sys
@@ -88,21 +88,8 @@ def process_iframes(soup: BeautifulSoup, base_url: str):
             continue
 
         iframe_url = urljoin(base_url, src)
-        parsed = urlparse(iframe_url)
 
-        # ⚠ Декодируем ТОЛЬКО fragment, иначе viewer.diagrams.net ломается
-        decoded_fragment = unquote(parsed.fragment)
-
-        clean_url = urlunparse((
-            parsed.scheme,
-            parsed.netloc,
-            parsed.path,
-            parsed.params,
-            parsed.query,
-            decoded_fragment
-        ))
-
-        replacement = f"\n\n[Открыть диаграмму]({clean_url})\n\n"
+        replacement = f"\n\n[Открыть диаграмму]({iframe_url})\n\n"
         iframe.replace_with(replacement)
 
 # ================= RSS =======================
