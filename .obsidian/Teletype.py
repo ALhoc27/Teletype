@@ -15,9 +15,9 @@ import asyncio
 from playwright.async_api import async_playwright
 
 class SafeMarkdownConverter(MarkdownConverter):
-    def escape(self, text):
-        # стандартное экранирование
-        text = super().escape(text)
+    def escape(self, text, parent_tags=None):
+        # вызываем оригинальный escape корректно
+        text = super().escape(text, parent_tags=parent_tags)
 
         # убираем экранирование markdown-символов
         text = text.replace(r"\*", "*")
@@ -527,6 +527,8 @@ async def main():
             )
 
             content_md = html.unescape(content_md)
+            # FIX: убираем лишний \ перед ** и __
+            content_md = re.sub(r'\\(?=\*\*|__)', '', content_md)
 
             created = ""
             if entry.get("published_parsed"):
@@ -540,9 +542,9 @@ async def main():
     url: {url}
     created: {created}
     updated: {updated}
-    ---
+---
 
-    """
+"""
 
             final_content = frontmatter + normalize_md(content_md)
 
@@ -626,3 +628,9 @@ async def main():
 
     finally:
         await close_browser()
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    finally:
+        log_file.close()
