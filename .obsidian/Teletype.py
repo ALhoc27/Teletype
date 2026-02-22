@@ -20,6 +20,7 @@ RSS_URL = "https://teletype.in/rss/bearsocietatis"
 # Teletype/.obsidian/Teletype.py
 VAULT_ROOT = Path(__file__).resolve().parent.parent
 CACHE_ROOT = VAULT_ROOT / "Teletype_0x" / "Cach"
+LOG_PATH = CACHE_ROOT / "import_log.txt"
 
 RSS_STATE_PATH = CACHE_ROOT / "rss_state.json"
 USED_IMAGES_PATH = CACHE_ROOT / ".used_images.json"
@@ -51,6 +52,20 @@ stats = {
     "cache_removed": 0,
     "categories_removed": 0,
 }
+
+# ================= LOGGING =====================
+
+import builtins
+
+log_file = open(LOG_PATH, "a", encoding="utf-8")
+
+_original_print = print
+
+def print(*args, **kwargs):
+    _original_print(*args, **kwargs)
+    text = " ".join(str(a) for a in args)
+    log_file.write(text + "\n")
+    log_file.flush()
 
 # ================= PLAYWRIGHT SESSION (ASYNC) =====================
 
@@ -223,11 +238,15 @@ async def process_iframes(soup: BeautifulSoup, article_url: str, slug: str, curr
 
         current_used.add(img_name)
 
-        replacement = f"![[Teletype_0x/Cach/{slug}/{img_name}]]\n\n[Открыть диаграмму]({iframe_url})\n\n"
+        replacement = f"![[Teletype_0x/Cach/{slug}/{img_name}]]\n\n"
         iframe.replace_with(replacement)
 
     if tasks:
-        await asyncio.gather(*tasks)
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        for r in results:
+            if isinstance(r, Exception):
+                print(f"❌ iframe export error: {r}")
 
 
 # ================= HELPERS ===================
@@ -412,7 +431,6 @@ async def main():
                 if s != text:
                     text.replace_with(s)
 
-        content_md = md(str(soup), heading_style="ATX")
         # нормализуем путь для Obsidian: убираем \_ и все \ в пути
         content_md = md(str(soup), heading_style="ATX")
 
@@ -472,6 +490,7 @@ async def main():
         if not any(p.suffix.lower() in IMAGE_EXTS for p in cache_dir.iterdir()):
             shutil.rmtree(cache_dir)
             used_images.pop(slug, None)
+            stats["cache_removed"] += 1
 
     # ================= CATEGORY GC ===============
 
@@ -501,12 +520,14 @@ async def main():
         f"={stats['articles_unchanged']} (без изменений)"
     )
     print(f"Удалено: статей: {stats['articles_removed']}")
+    print(f"Скачано изображений: {stats['images_downloaded']}")
     print(f"         изображений: {stats['images_removed']}")
     print(f"         папок кеша: {stats['cache_removed']}")
     print(f"         категорий: {stats['categories_removed']}")
 
     await close_browser()
     print("\n✅ Готово.")
+    log_file.close()
 
 
 if __name__ == "__main__":
