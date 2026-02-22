@@ -12,6 +12,7 @@ import hashlib
 import shutil
 import asyncio
 from playwright.async_api import async_playwright
+from PIL import ImageChops
 
 # ================= НАСТРОЙКИ =================
 
@@ -74,15 +75,17 @@ async def get_browser():
 
     return browser_instance, context_instance
 
-
 async def close_browser():
-    global playwright_instance, browser_instance
+    global playwright_instance, browser_instance, context_instance
 
     if browser_instance:
         await browser_instance.close()
+        browser_instance = None
+        context_instance = None
 
     if playwright_instance:
         await playwright_instance.stop()
+        playwright_instance = None
 
 # ================= IFRAME IMAGE EXPORT ===================
 from PIL import Image, ImageDraw, ImageFont
@@ -100,6 +103,36 @@ def create_placeholder(img_path: Path, url: str):
     img.save(img_path)
     stats["images_downloaded"] += 1
     print(f"⬇ IMG (placeholder): {img_path.name}")
+
+def autocrop_image(path: Path, padding: int = 20):
+    with Image.open(path) as img:
+
+        if img.mode in ("RGBA", "LA"):
+            bg = Image.new("RGB", img.size, (255, 255, 255))
+            bg.paste(img, mask=img.split()[-1])
+            img = bg
+
+        bg_color = img.getpixel((0, 0))
+        bg = Image.new(img.mode, img.size, bg_color)
+
+        diff = ImageChops.difference(img, bg)
+        bbox = diff.getbbox()
+
+        if not bbox:
+            return
+
+        cropped = img.crop(bbox)
+
+        if padding:
+            padded = Image.new(
+                "RGB",
+                (cropped.width + padding * 2, cropped.height + padding * 2),
+                bg_color
+            )
+            padded.paste(cropped, (padding, padding))
+            cropped = padded
+
+        cropped.save(path)
 
 async def export_drawio_via_svg(context, url: str, img_path: Path):
     """Async экспорт diagrams.net с hash-проверкой"""
@@ -128,6 +161,8 @@ async def export_drawio_via_svg(context, url: str, img_path: Path):
         tmp_path = img_path.with_suffix(".tmp.png")
 
         await page.screenshot(path=str(tmp_path), clip=box)
+
+        autocrop_image(tmp_path)
 
         new_hash = file_sha(tmp_path)
         old_hash = file_sha(img_path)
