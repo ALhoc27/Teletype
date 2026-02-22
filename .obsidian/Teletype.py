@@ -12,7 +12,6 @@ import hashlib
 import shutil
 import asyncio
 from playwright.async_api import async_playwright
-from PIL import ImageChops
 
 # ================= НАСТРОЙКИ =================
 
@@ -75,20 +74,20 @@ async def get_browser():
 
     return browser_instance, context_instance
 
+
 async def close_browser():
-    global playwright_instance, browser_instance, context_instance
+    global playwright_instance, browser_instance
 
     if browser_instance:
         await browser_instance.close()
-        browser_instance = None
-        context_instance = None
 
     if playwright_instance:
         await playwright_instance.stop()
-        playwright_instance = None
+
 
 # ================= IFRAME IMAGE EXPORT ===================
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageChops
+
 
 def create_placeholder(img_path: Path, url: str):
     """Создаёт fallback-изображение с текстом ссылки"""
@@ -107,6 +106,7 @@ def create_placeholder(img_path: Path, url: str):
 def autocrop_image(path: Path, padding: int = 20):
     with Image.open(path) as img:
 
+        # если есть прозрачность — заменяем на белый фон
         if img.mode in ("RGBA", "LA"):
             bg = Image.new("RGB", img.size, (255, 255, 255))
             bg.paste(img, mask=img.split()[-1])
@@ -162,6 +162,7 @@ async def export_drawio_via_svg(context, url: str, img_path: Path):
 
         await page.screenshot(path=str(tmp_path), clip=box)
 
+        # 🔥 обрезаем пустоты
         autocrop_image(tmp_path)
 
         new_hash = file_sha(tmp_path)
@@ -177,6 +178,7 @@ async def export_drawio_via_svg(context, url: str, img_path: Path):
 
     finally:
         await page.close()
+
 
 async def process_iframes(soup: BeautifulSoup, article_url: str, slug: str, current_used: set):
     """Async обработка iframe"""
@@ -209,7 +211,7 @@ async def process_iframes(soup: BeautifulSoup, article_url: str, slug: str, curr
             continue
 
         iframe_url = urljoin(article_url, real_sources[i])
-        img_name = f"iframe_{i+1}.png"
+        img_name = f"iframe_{i + 1}.png"
         img_path = article_cache / img_name
 
         parsed = urlparse(iframe_url)
@@ -227,38 +229,46 @@ async def process_iframes(soup: BeautifulSoup, article_url: str, slug: str, curr
     if tasks:
         await asyncio.gather(*tasks)
 
+
 # ================= HELPERS ===================
 
 def normalize_tag(tag: str) -> str:
     return tag.replace(" ", "_").lower()
+
 
 def safe_filename(name: str) -> str:
     name = re.sub(r'[\\/*?:"<>|]', "", name)
     name = re.sub(r"\s+", " ", name)
     return name.strip()[:MAX_SLUG_LEN]
 
+
 def normalize_image_name(name: str) -> str:
     stem = re.sub(r"[^\w\-]+", "_", Path(name).stem.lower())
     ext = Path(name).suffix.lower() or ".jpg"
     return f"{stem}{ext}"
 
+
 def sha(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
 
 def file_sha(path: Path) -> str:
     if not path.exists():
         return ""
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
+
 def normalize_html_for_hash(html: str) -> str:
     soup = BeautifulSoup(html, "html.parser")
     return re.sub(r"\s+", " ", soup.decode()).strip()
+
 
 def normalize_md(text: str) -> str:
     text = text.replace("\r\n", "\n")
     text = re.sub(r"[ \t]+$", "", text, flags=re.MULTILINE)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip() + "\n"
+
 
 # ================= IFRAME PROCESSING ===================
 
@@ -427,7 +437,7 @@ async def main():
     created: {created}
     updated: {updated}
     ---
-    
+
     """
 
         md_path.write_text(frontmatter + normalize_md(content_md), "utf-8")
@@ -497,6 +507,7 @@ async def main():
 
     await close_browser()
     print("\n✅ Готово.")
+
 
 if __name__ == "__main__":
     asyncio.run(main())
