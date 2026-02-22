@@ -30,6 +30,11 @@ AUTHOR = "Alexander"
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 MAX_SLUG_LEN = 120
 
+# === ГЛОБАЛЬНЫЙ ЛИМИТ ОБРАБОТКИ ===
+# None = без ограничений
+# Например: 300 — обработать максимум 300 записей за запуск
+PROCESS_LIMIT = None # Если много записей новых или на обновление выстави лимит, и каждый запуск увеличивай его что бы обработать все, если записей очень много
+
 # =============================================
 
 CACHE_ROOT.mkdir(parents=True, exist_ok=True)
@@ -47,11 +52,17 @@ stats = {
     "articles_updated": 0,
     "articles_unchanged": 0,
     "articles_removed": 0,
-    "images_downloaded": 0,
+
+    "images_http_downloaded": 0,
+    "images_iframe_rendered": 0,
+    "images_placeholder_created": 0,
+
     "images_removed": 0,
     "cache_removed": 0,
     "categories_removed": 0,
 }
+
+IFRAME_LIMIT = asyncio.Semaphore(3)
 
 # ================= LOGGING =====================
 
@@ -83,7 +94,12 @@ async def get_browser():
     playwright_instance = await async_playwright().start()
     browser_instance = await playwright_instance.chromium.launch(
         headless=True,
-        args=["--disable-http2"]
+        args=[
+            "--disable-http2",
+            "--disable-dev-shm-usage",
+            "--disable-gpu",
+            "--no-sandbox"
+        ]
     )
     context_instance = await browser_instance.new_context(
         viewport={"width": 2000, "height": 1500},
@@ -94,7 +110,10 @@ async def get_browser():
 
 
 async def close_browser():
-    global playwright_instance, browser_instance
+    global playwright_instance, browser_instance, context_instance
+
+    if context_instance:
+        await context_instance.close()
 
     if browser_instance:
         await browser_instance.close()
@@ -118,7 +137,7 @@ def create_placeholder(img_path: Path, url: str):
     text = f"Открыть диаграмму: {url}"
     draw.text((10, 80), text, fill="black", font=font)
     img.save(img_path)
-    stats["images_downloaded"] += 1
+    stats["images_placeholder_created"] += 1
     print(f"⬇ IMG (placeholder): {img_path.name}")
 
 def autocrop_image(path: Path, padding: int = 20):
@@ -130,10 +149,9 @@ def autocrop_image(path: Path, padding: int = 20):
             bg.paste(img, mask=img.split()[-1])
             img = bg
 
-        bg_color = img.getpixel((0, 0))
-        bg = Image.new(img.mode, img.size, bg_color)
-
-        diff = ImageChops.difference(img, bg)
+        img_rgb = img.convert("RGB")
+        bg = Image.new("RGB", img.size, (255, 255, 255))
+        diff = ImageChops.difference(img_rgb, bg)
         bbox = diff.getbbox()
 
         if not bbox:
@@ -145,7 +163,7 @@ def autocrop_image(path: Path, padding: int = 20):
             padded = Image.new(
                 "RGB",
                 (cropped.width + padding * 2, cropped.height + padding * 2),
-                bg_color
+                (255, 255, 255)
             )
             padded.paste(cropped, (padding, padding))
             cropped = padded
@@ -153,92 +171,86 @@ def autocrop_image(path: Path, padding: int = 20):
         cropped.save(path)
 
 async def export_drawio_via_svg(context, url: str, img_path: Path):
-    page = await context.new_page()
+    async with IFRAME_LIMIT:
+        page = await context.new_page()
 
-    try:
-        html = f"""
-        <html>
-        <body style="margin:0;padding:0;background:white;">
-            <iframe
-                src="{url}"
-                style="width:2000px;height:1500px;border:0;"
-                allowfullscreen>
-            </iframe>
-        </body>
-        </html>
-        """
+        try:
+            html = f"""
+            <html>
+            <body style="margin:0;padding:0;background:white;">
+                <iframe
+                    src="{url}"
+                    style="width:2000px;height:1500px;border:0;"
+                    allowfullscreen>
+                </iframe>
+            </body>
+            </html>
+            """
 
-        await page.set_content(html)
+            await page.set_content(html)
 
-        # ждём загрузку iframe
-        await page.wait_for_selector("iframe")
-        # даём iframe начать загрузку
-        await asyncio.sleep(0.5)
+            # ждём загрузку iframe
+            await page.wait_for_selector("iframe")
+            # даём iframe начать загрузку
+            await asyncio.sleep(0.5)
 
-        element = None
+            element = None
 
-        print("🔎 Waiting for viewer render...")
-        # ищем svg ИЛИ canvas
-        for frame in page.frames:
-            try:
-                await frame.wait_for_selector("svg, canvas", timeout=10000)
-                elements = await frame.query_selector_all("svg, canvas")
-                if elements:
-                    element = elements[0]
-                    break
-            except:
-                continue
+            print("🔎 Waiting for viewer render...")
+            # ищем svg ИЛИ canvas
+            for frame in page.frames:
+                try:
+                    await frame.wait_for_selector("svg, canvas", timeout=10000)
+                    elements = await frame.query_selector_all("svg, canvas")
+                    if elements:
+                        element = elements[0]
+                        break
+                except:
+                    continue
 
-        if not element:
-            print("⚠ SVG/Canvas не найден → placeholder")
+            if not element:
+                print("⚠ SVG/Canvas не найден → placeholder")
+                create_placeholder(img_path, url)
+                return
+
+            box = await element.bounding_box()
+
+            if not box:
+                print("⚠ Bounding box не найден → placeholder")
+                create_placeholder(img_path, url)
+                return
+
+            tmp_path = img_path.with_suffix(".tmp.png")
+
+            old_hash = file_sha(img_path)
+
+            await page.screenshot(path=str(tmp_path), clip=box)
+
+            autocrop_image(tmp_path)
+
+            new_hash = file_sha(tmp_path)
+
+            if new_hash != old_hash:
+                tmp_path.replace(img_path)
+                stats["images_iframe_rendered"] += 1
+                print(f"⬇ IMG updated: {img_path.name}")
+            else:
+                tmp_path.unlink()
+                print(f"✓ IMG unchanged: {img_path.name}")
+
+        except Exception as e:
+            print(f"❌ iframe export error: {e}")
             create_placeholder(img_path, url)
-            return
 
-        box = await element.bounding_box()
+        finally:
+            await page.close()
 
-        if not box:
-            print("⚠ Bounding box не найден → placeholder")
-            create_placeholder(img_path, url)
-            return
-
-        tmp_path = img_path.with_suffix(".tmp.png")
-
-        await page.screenshot(path=str(tmp_path), clip=box)
-
-        autocrop_image(tmp_path)
-
-        new_hash = file_sha(tmp_path)
-        old_hash = file_sha(img_path)
-
-        if new_hash != old_hash:
-            tmp_path.replace(img_path)
-            print(f"⬇ IMG updated: {img_path.name}")
-            stats["images_downloaded"] += 1
-        else:
-            tmp_path.unlink()
-            print(f"✓ IMG unchanged: {img_path.name}")
-
-    except Exception as e:
-        print(f"❌ iframe export error: {e}")
-        create_placeholder(img_path, url)
-
-    finally:
-        await page.close()
-
-
-async def process_iframes(soup: BeautifulSoup, article_url: str, slug: str, current_used: set):
+async def process_iframes(soup: BeautifulSoup, article_url: str, slug: str, current_used: set, page_soup: BeautifulSoup):
     """Async обработка iframe"""
 
-    try:
-        r = session.get(article_url, timeout=20)
-        if r.status_code != 200:
-            return
-    except:
-        return
-
-    page_soup = BeautifulSoup(r.text, "html.parser")
     real_iframes = page_soup.find_all("iframe")
     if not real_iframes:
+        print("⚠ Page iframe not found — 👉 в HTML не найдено ни одного <iframe> может проблемы с сетью")
         return
 
     real_sources = [iframe.get("src") for iframe in real_iframes if iframe.get("src")]
@@ -267,8 +279,11 @@ async def process_iframes(soup: BeautifulSoup, article_url: str, slug: str, curr
                 export_drawio_via_svg(context, iframe_url, img_path)
             )
 
-        replacement = f"![[Teletype_0x/Cach/{slug}/{img_name}|500]]\n\n"
-        iframe.replace_with(replacement)
+            replacement = f"![[Teletype_0x/Cach/{slug}/{img_name}|500]]\n\n"
+            iframe.replace_with(replacement)
+        else:
+            # удаляем iframe, который не поддерживаем
+            iframe.decompose()
 
     if tasks:
         for r in await asyncio.gather(*tasks, return_exceptions=True):
@@ -375,8 +390,13 @@ async def main():
         }
 
     # ================= IMPORT ====================
-
+    processed_count = 0
     for entry in feed.entries:
+
+        if PROCESS_LIMIT is not None and processed_count >= PROCESS_LIMIT:
+            print(f"⏹ Достигнут лимит обработки: {PROCESS_LIMIT}")
+            break
+
         url = entry.link
         title = entry.title.strip()
         slug = safe_filename(title)
@@ -388,36 +408,34 @@ async def main():
         md_path = article_dir / f"{slug}.md"
         is_new = not md_path.exists()
 
-        raw_html = entry.get("content", [{}])[0].get("value", "")
+        content_list = entry.get("content") or []
+        raw_html = content_list[0].get("value", "") if content_list else ""
         html_hash = sha(normalize_html_for_hash(raw_html))
-
-        # 🔥 добавляем hash iframe src из реальной страницы
-        try:
-            r = session.get(url, timeout=20)
-            if r.status_code == 200:
-                page_soup = BeautifulSoup(r.text, "html.parser")
-                iframe_srcs = sorted(
-                    iframe.get("src", "")
-                    for iframe in page_soup.find_all("iframe")
-                )
-                iframe_hash = sha("".join(iframe_srcs))
-                html_hash = sha(html_hash + iframe_hash)
-        except:
-            pass
 
         article_cache = CACHE_ROOT / slug
         hash_path = article_cache / ".content.hash"
         old_hash = hash_path.read_text("utf-8") if hash_path.exists() else None
 
+        # Если RSS HTML не изменился — пропускаем полностью
         if md_path.exists() and old_hash == html_hash:
             stats["articles_unchanged"] += 1
             continue
+
+        # Только если изменился — тогда идём на страницу за iframe
+        page_soup = BeautifulSoup("", "html.parser")
+
+        try:
+            r = session.get(url, timeout=20)
+            if r.status_code == 200:
+                page_soup = BeautifulSoup(r.text, "html.parser")
+        except:
+            pass
 
         soup = BeautifulSoup(raw_html, "html.parser")
 
         # 🔥 обработка iframe (viewer.diagrams.net и др.)
         current_used = set()
-        await process_iframes(soup, url, slug, current_used)
+        await process_iframes(soup, url, slug, current_used, page_soup)
 
         image_index = {}
         index_path = article_cache / ".images.json"
@@ -439,11 +457,11 @@ async def main():
             img_name = normalize_image_name(raw)
 
             if img_url not in image_index:
-                r = session.get(img_url, timeout=20)
+                r = await asyncio.to_thread(session.get, img_url, timeout=20)
                 if r.status_code == 200:
                     (article_cache / img_name).write_bytes(r.content)
                     image_index[img_url] = img_name
-                    stats["images_downloaded"] += 1
+                    stats["images_http_downloaded"] += 1
                     print(f"⬇ IMG: {slug}/{img_name}")
                 else:
                     continue  # пропускаем битое изображение
@@ -468,9 +486,9 @@ async def main():
         if has_images:
             index_path.write_text(json.dumps(image_index, indent=2), "utf-8")
 
-        # сохраняем used даже если только iframe
-        if current_used:
-            used_images[slug] = current_used
+        # гарантируем, что slug всегда обновляется
+        used_images[slug] = set()
+        used_images[slug].update(current_used)
 
         if is_new:
             for text in soup.find_all(string=True):
@@ -522,6 +540,10 @@ updated: {updated}
             print(f"✏ UPDATE: {slug}")
             stats["articles_updated"] += 1
 
+        processed_count += 1
+
+
+
     # ================= IMAGE GC ==================
 
     for slug, imgs in list(used_images.items()):
@@ -571,7 +593,9 @@ updated: {updated}
         f"~{stats['articles_updated']} (обновлённые) / "
         f"={stats['articles_unchanged']} (без изменений)"
     )
-    print(f"Скачано изображений: {stats['images_downloaded']}")
+    print(f"HTTP изображений скачано: {stats['images_http_downloaded']}")
+    print(f"Iframe изображений отрендерено: {stats['images_iframe_rendered']}")
+    print(f"Placeholder создано: {stats['images_placeholder_created']}")
     print(f"Удалено: статей: {stats['articles_removed']}")
     print(f"         изображений: {stats['images_removed']}")
     print(f"         папок кеша: {stats['cache_removed']}")
@@ -579,8 +603,10 @@ updated: {updated}
 
     await close_browser()
     print("\n✅ Готово.")
-    log_file.close()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    finally:
+        log_file.close()
