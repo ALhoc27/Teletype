@@ -155,7 +155,12 @@ async def export_drawio_via_svg(context, url: str, img_path: Path):
     page = await context.new_page()
 
     try:
-        await page.goto(url, timeout=60000)
+        try:
+            await page.goto(url, timeout=60000)
+        except Exception as e:
+            print(f"⚠ viewer load failed, fallback: {e}")
+            create_placeholder(img_path, url)
+            return
         await page.wait_for_timeout(3000)
 
         svg_element = None
@@ -238,7 +243,7 @@ async def process_iframes(soup: BeautifulSoup, article_url: str, slug: str, curr
 
         current_used.add(img_name)
 
-        replacement = f"![[Teletype_0x/Cach/{slug}/{img_name}]]\n\n"
+        replacement = f"![[Teletype_0x/Cach/{slug}/{img_name}|400]]\n\n"
         iframe.replace_with(replacement)
 
     if tasks:
@@ -414,7 +419,21 @@ async def main():
                     print(f"⬇ IMG: {slug}/{img_name}")
 
             current_used.add(image_index[img_url])
-            img.replace_with(f"OBSIDIAN_IMAGE::{slug}/{image_index[img_url]}")
+            img_file = article_cache / image_index[img_url]
+
+            width_part = ""
+
+            try:
+                from PIL import Image
+                with Image.open(img_file) as im:
+                    new_width = int(im.width * 0.50)
+                    width_part = f"|{new_width}"
+            except:
+                pass
+
+            img.replace_with(
+                f"OBSIDIAN_IMAGE::{slug}/{image_index[img_url]}{width_part}"
+            )
 
         if has_images:
             index_path.write_text(json.dumps(image_index, indent=2), "utf-8")
@@ -449,14 +468,14 @@ async def main():
         updated = str(datetime.now().date())
 
         frontmatter = f"""---
-    source: teletype
-    author: {AUTHOR}
-    url: {url}
-    created: {created}
-    updated: {updated}
-    ---
-
-    """
+source: teletype
+author: {AUTHOR}
+url: {url}
+created: {created}
+updated: {updated}
+---
+    
+"""
 
         md_path.write_text(frontmatter + normalize_md(content_md), "utf-8")
 
@@ -519,8 +538,8 @@ async def main():
         f"~{stats['articles_updated']} (обновлённые) / "
         f"={stats['articles_unchanged']} (без изменений)"
     )
-    print(f"Удалено: статей: {stats['articles_removed']}")
     print(f"Скачано изображений: {stats['images_downloaded']}")
+    print(f"Удалено: статей: {stats['articles_removed']}")
     print(f"         изображений: {stats['images_removed']}")
     print(f"         папок кеша: {stats['cache_removed']}")
     print(f"         категорий: {stats['categories_removed']}")

@@ -4,21 +4,21 @@
     "type": "split",
     "children": [
       {
-        "id": "9684ce6d39468e43",
+        "id": "a307e3a6b651737e",
         "type": "tabs",
         "children": [
           {
-            "id": "1494ab8088a81c44",
+            "id": "a058f4440f7799dd",
             "type": "leaf",
             "state": {
               "type": "markdown",
               "state": {
-                "file": "windows/Diskpart (дисковая утилита) (программа для диска) (дискпарт).md",
+                "file": "misc/Терминал и Finder (Команды 1).md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "Diskpart (дисковая утилита) (программа для диска) (дискпарт)"
+              "title": "Терминал и Finder (Команды 1)"
             }
           }
         ]
@@ -184,30 +184,37 @@
       "omnisearch:Omnisearch": false
     }
   },
-  "active": "1494ab8088a81c44",
+  "active": "a058f4440f7799dd",
   "lastOpenFiles": [
-    "misc/Терминал и Finder (Команды 1).md",
     "windows/Diskpart (дисковая утилита) (программа для диска) (дискпарт).md",
-    "Teletype_0x/Cach/Терминал и Finder (Команды 1)/4d499c8e-5bde-4e54-a143-0e846af1604b.png",
-    "Teletype_0x/Cach/Терминал и Finder (Команды 1)/cba573d1-c35d-4ccc-9108-8f205de1cc9d.png",
-    "Teletype_0x/Cach/Терминал и Finder (Команды 1)/f230e39e-f5b2-490e-9649-4fadcafc48f4.png",
-    "Teletype_0x/Cach/Терминал и Finder (Команды 1)/a236766d-3a6b-48a3-8ff6-fc8b29716902.png",
-    "Teletype_0x/Cach/Терминал и Finder (Команды 1)/862ef579-78c2-4a5a-9537-b17485cbc808.png",
-    "Teletype_0x/Cach/Терминал и Finder (Команды 1)/d0a1d0bdd0b8d0bcd0bed0ba-d18dd0bad180d0b0d0bdd0b0-2024-09-30-d0b2-21_44_24.png",
+    "misc/Терминал и Finder (Команды 1).md",
     "Teletype_0x/Cach/Терминал и Finder (Команды 1)/iframe_1.png",
-    "Teletype_0x/Cach/Терминал и Finder (Команды 1)/iframe_1.tmp.png",
-    "Teletype_0x/Cach/Терминал и Finder (Команды 1)",
     "Teletype_0x/Cach/rss_state.json",
     "Teletype_0x/Cach/Diskpart (дисковая утилита) (программа для диска) (дискпарт)",
+    "windows",
     "Teletype_0x/Cach/Очистить кеш FileZilla",
+    "программы/Очистить кеш FileZilla.md",
+    "mac_os/Как полностью удалить приложение MAC.md",
     "Teletype_0x/Cach/Как полностью удалить приложение MAC/6be09414-2e3a-472e-b0cc-cd51c1fb5b2b.png",
     "Teletype_0x/Cach/Как полностью удалить приложение MAC/ba0af9d5-1fa0-41a1-8640-d433bfb0a679.png",
     "Teletype_0x/Cach/Как полностью удалить приложение MAC",
     "Teletype_0x/Cach/Как включить запись экрана (MAC)",
+    "mac_os/Как включить запись экрана (MAC).md",
+    "настройки/Как очистить кэш компьютера.md",
+    "Teletype_0x/Cach/Как очистить кэш компьютера/f90545ed-ff36-4293-99aa-6c43f75d453a.png",
+    "Teletype_0x/Cach/Как очистить кэш компьютера/cd41221a-d3a1-4939-8d5b-71f51175e808.png",
+    "Teletype_0x/Cach/Как очистить кэш компьютера/cc1a18c0-0bed-4163-98e3-2aab69bafc01.png",
+    "Teletype_0x/Cach/Как очистить кэш компьютера/8bfebaa9-d240-4e8f-99e8-de1d6dc18a3d.png",
+    "Teletype_0x/Cach/Как очистить кэш компьютера/454ead67-1bb8-439f-8ea9-75c45b12f786.png",
+    "Teletype_0x/Cach/Как очистить кэш компьютера/2c5e718f-5e2d-40f1-af0d-78e23d5069b7.png",
+    "Teletype_0x/Cach/Как очистить кэш компьютера/8b5f56ab-57af-454c-8545-87e7b13fe9d2.png",
     "Teletype_0x/Cach/Как очистить кэш компьютера",
+    "настройки",
     "Teletype_0x/Cach/Редактирование hosts macOS",
+    "mac_os/Редактирование hosts macOS.md",
     "Teletype_0x/Cach/Как скопировать HEX-код цвета с экрана Mac",
-    "Teletype_0x/Cach/Открыть диспетчер задач из под 1С (Диспетчер задач)",
+    "mac_os/Как скопировать HEX-код цвета с экрана Mac.md",
+    "программы/Открыть диспетчер задач из под 1С (Диспетчер задач).md",
     "misc/уауа.md",
     "windows/вым.md",
     "windows/аыпкк.md",
@@ -223,13 +230,6 @@
     "mac_os/какака.md",
     "misc/234234.md",
     "windows/сук.md",
-    "mac_os/мак.md",
-    "misc/ffffffff.md",
-    "misc/2e.md",
-    "misc/привет барсукииииии.md",
-    "windows/1212112.md",
-    "настройки/УЛЯЛЯЛЯ.md",
-    "misc/привет барсук.md",
-    "misc/привет.md"
+    "mac_os/мак.md"
   ]
 }
