@@ -1,1 +1,0 @@
-<div style="height: 4px; background: linear-gradient(to right, #888, #ddd); box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2); margin: 20px 0; border-radius: 2px;"></div>

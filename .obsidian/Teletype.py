@@ -1,7 +1,8 @@
 import feedparser
 import requests
 from bs4 import BeautifulSoup, NavigableString
-from markdownify import markdownify as md
+from markdownify import MarkdownConverter
+import html
 from pathlib import Path
 from datetime import datetime
 from urllib.parse import urljoin, urlparse
@@ -12,6 +13,21 @@ import hashlib
 import shutil
 import asyncio
 from playwright.async_api import async_playwright
+
+class SafeMarkdownConverter(MarkdownConverter):
+    def escape(self, text):
+        # стандартное экранирование
+        text = super().escape(text)
+
+        # убираем экранирование markdown-символов
+        text = text.replace(r"\*", "*")
+        text = text.replace(r"\_", "_")
+
+        return text
+
+
+def md_safe(html_text: str) -> str:
+    return SafeMarkdownConverter(heading_style="ATX").convert(html_text)
 
 # ================= НАСТРОЙКИ =================
 
@@ -65,8 +81,6 @@ stats = {
 IFRAME_LIMIT = asyncio.Semaphore(3)
 
 # ================= LOGGING =====================
-
-import builtins
 
 log_file = open(LOG_PATH, "a", encoding="utf-8")
 
@@ -250,7 +264,7 @@ async def process_iframes(soup: BeautifulSoup, article_url: str, slug: str, curr
 
     real_iframes = page_soup.find_all("iframe")
     if not real_iframes:
-        print("⚠ Page iframe not found — 👉 в HTML не найдено ни одного <iframe> может проблемы с сетью")
+        # print("⚠ Page iframe not found — 👉 в HTML не найдено ни одного <iframe>")
         return
 
     real_sources = [iframe.get("src") for iframe in real_iframes if iframe.get("src")]
@@ -486,9 +500,11 @@ async def main():
         if has_images:
             index_path.write_text(json.dumps(image_index, indent=2), "utf-8")
 
-        # гарантируем, что slug всегда обновляется
-        used_images[slug] = set()
-        used_images[slug].update(current_used)
+        # сохраняем только если есть реальные изображения
+        if current_used:
+            used_images[slug] = set(current_used)
+        else:
+            used_images.pop(slug, None)
 
         if is_new:
             for text in soup.find_all(string=True):
@@ -497,12 +513,12 @@ async def main():
                 s = str(text)
                 for t in all_titles:
                     if t != title:
-                        s = re.sub(rf'(?<!\[\[){re.escape(t)}(?!\]\])', f"[[{t}]]", s)
+                        s = re.sub(rf'(?<!\[\[)\b{re.escape(t)}\b(?!\]\])', f"[[{t}]]", s)
                 if s != text:
                     text.replace_with(s)
 
         # нормализуем путь для Obsidian: убираем \_ и все \ в пути
-        content_md = md(str(soup), heading_style="ATX")
+        content_md = md_safe(str(soup))
 
         content_md = re.sub(
             r"OBSIDIAN\\?_IMAGE::([^\n]+)",
@@ -510,7 +526,7 @@ async def main():
             content_md
         )
 
-        content_md = content_md.replace("\\_", "_")
+        content_md = html.unescape(content_md)
 
         created = ""
         if entry.get("published_parsed"):
@@ -528,7 +544,12 @@ updated: {updated}
     
 """
 
-        md_path.write_text(frontmatter + normalize_md(content_md), "utf-8")
+        final_content = frontmatter + normalize_md(content_md)
+
+        tmp_md_path = md_path.with_suffix(".tmp")
+
+        tmp_md_path.write_text(final_content, "utf-8")
+        tmp_md_path.replace(md_path)
 
         article_cache.mkdir(parents=True, exist_ok=True)
         hash_path.write_text(html_hash, "utf-8")
@@ -561,7 +582,9 @@ updated: {updated}
                 stats["images_removed"] += 1
 
         # Если после удаления нет файлов, удаляем папку
-        if not any(p.suffix.lower() in IMAGE_EXTS for p in cache_dir.iterdir()):
+        if cache_dir.exists() and not any(
+                p.suffix.lower() in IMAGE_EXTS for p in cache_dir.iterdir()
+        ):
             shutil.rmtree(cache_dir)
             used_images.pop(slug, None)
             stats["cache_removed"] += 1

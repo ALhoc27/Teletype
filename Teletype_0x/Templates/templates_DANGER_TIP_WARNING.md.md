@@ -1,8 +1,0 @@
-
-> [!DANGER]
-> 
-
-> [!WARNING]
-
-> [!TIP]
-> 
