@@ -81,10 +81,13 @@ async def get_browser():
         return browser_instance, context_instance
 
     playwright_instance = await async_playwright().start()
-    browser_instance = await playwright_instance.chromium.launch(headless=True)
+    browser_instance = await playwright_instance.chromium.launch(
+        headless=True,
+        args=["--disable-http2"]
+    )
     context_instance = await browser_instance.new_context(
         viewport={"width": 2000, "height": 1500},
-        device_scale_factor=3
+        device_scale_factor=2
     )
 
     return browser_instance, context_instance
@@ -150,39 +153,58 @@ def autocrop_image(path: Path, padding: int = 20):
         cropped.save(path)
 
 async def export_drawio_via_svg(context, url: str, img_path: Path):
-    """Async экспорт diagrams.net с hash-проверкой"""
-
     page = await context.new_page()
 
     try:
-        try:
-            await page.goto(url, timeout=60000)
-        except Exception as e:
-            print(f"⚠ viewer load failed, fallback: {e}")
+        html = f"""
+        <html>
+        <body style="margin:0;padding:0;background:white;">
+            <iframe
+                src="{url}"
+                style="width:2000px;height:1500px;border:0;"
+                allowfullscreen>
+            </iframe>
+        </body>
+        </html>
+        """
+
+        await page.set_content(html)
+
+        # ждём загрузку iframe
+        await page.wait_for_selector("iframe")
+        # даём iframe начать загрузку
+        await asyncio.sleep(0.5)
+
+        element = None
+
+        print("🔎 Waiting for viewer render...")
+        # ищем svg ИЛИ canvas
+        for frame in page.frames:
+            try:
+                await frame.wait_for_selector("svg, canvas", timeout=10000)
+                elements = await frame.query_selector_all("svg, canvas")
+                if elements:
+                    element = elements[0]
+                    break
+            except:
+                continue
+
+        if not element:
+            print("⚠ SVG/Canvas не найден → placeholder")
             create_placeholder(img_path, url)
             return
-        await page.wait_for_timeout(3000)
 
-        svg_element = None
+        box = await element.bounding_box()
 
-        for frame in page.frames:
-            svgs = await frame.query_selector_all("svg")
-            if svgs:
-                svg_element = svgs[0]
-                break
-
-        if not svg_element:
-            raise Exception("SVG не найден")
-
-        box = await svg_element.bounding_box()
         if not box:
-            raise Exception("Bounding box не найден")
+            print("⚠ Bounding box не найден → placeholder")
+            create_placeholder(img_path, url)
+            return
 
         tmp_path = img_path.with_suffix(".tmp.png")
 
         await page.screenshot(path=str(tmp_path), clip=box)
 
-        # 🔥 обрезаем пустоты
         autocrop_image(tmp_path)
 
         new_hash = file_sha(tmp_path)
@@ -195,6 +217,10 @@ async def export_drawio_via_svg(context, url: str, img_path: Path):
         else:
             tmp_path.unlink()
             print(f"✓ IMG unchanged: {img_path.name}")
+
+    except Exception as e:
+        print(f"❌ iframe export error: {e}")
+        create_placeholder(img_path, url)
 
     finally:
         await page.close()
@@ -241,17 +267,19 @@ async def process_iframes(soup: BeautifulSoup, article_url: str, slug: str, curr
                 export_drawio_via_svg(context, iframe_url, img_path)
             )
 
-        current_used.add(img_name)
-
-        replacement = f"![[Teletype_0x/Cach/{slug}/{img_name}|400]]\n\n"
+        replacement = f"![[Teletype_0x/Cach/{slug}/{img_name}|500]]\n\n"
         iframe.replace_with(replacement)
 
     if tasks:
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        for r in results:
+        for r in await asyncio.gather(*tasks, return_exceptions=True):
             if isinstance(r, Exception):
                 print(f"❌ iframe export error: {r}")
+
+        for i, iframe in enumerate(rss_iframes):
+            img_name = f"iframe_{i + 1}.png"
+            img_path = article_cache / img_name
+            if img_path.exists():
+                current_used.add(img_name)
 
 
 # ================= HELPERS ===================
@@ -417,6 +445,8 @@ async def main():
                     image_index[img_url] = img_name
                     stats["images_downloaded"] += 1
                     print(f"⬇ IMG: {slug}/{img_name}")
+                else:
+                    continue  # пропускаем битое изображение
 
             current_used.add(image_index[img_url])
             img_file = article_cache / image_index[img_url]
@@ -437,6 +467,9 @@ async def main():
 
         if has_images:
             index_path.write_text(json.dumps(image_index, indent=2), "utf-8")
+
+        # сохраняем used даже если только iframe
+        if current_used:
             used_images[slug] = current_used
 
         if is_new:
