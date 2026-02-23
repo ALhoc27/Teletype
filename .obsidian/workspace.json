@@ -14,7 +14,7 @@
               "type": "markdown",
               "state": {
                 "file": "программы/Открыть диспетчер задач из под 1С (Диспетчер задач).md",
-                "mode": "preview",
+                "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
@@ -188,6 +188,8 @@
   "active": "d4c64bb1497b5298",
   "lastOpenFiles": [
     "программы/Очистить кеш FileZilla.md",
+    "программы/Открыть диспетчер задач из под 1С (Диспетчер задач).md",
+    "программы",
     "mac_os/Как включить запись экрана (MAC).md",
     "mac_os/Как полностью удалить приложение MAC.md",
     "mac_os/Как скопировать HEX-код цвета с экрана Mac.md",
@@ -195,7 +197,6 @@
     "настройки/Как очистить кэш компьютера.md",
     "windows/Diskpart (дисковая утилита) (программа для диска) (дискпарт).md",
     "misc/Терминал и Finder (Команды 1).md",
-    "программы/Открыть диспетчер задач из под 1С (Диспетчер задач).md",
     "9.md",
     "Teletype_0x/Cach/rss_state.json",
     "Teletype_0x/Cach/Diskpart (дисковая утилита) (программа для диска) (дискпарт)",
@@ -216,7 +217,6 @@
     "Teletype_0x/Cach/Как очистить кэш компьютера",
     "настройки",
     "Teletype_0x/Cach/Редактирование hosts macOS",
-    "Teletype_0x/Cach/Как скопировать HEX-код цвета с экрана Mac",
     "misc/уауа.md",
     "windows/вым.md",
     "windows/аыпкк.md",
@@ -231,7 +231,6 @@
     "hidden/AiCloud (Cloud Disk) (флешка роутер).md",
     "mac_os/какака.md",
     "misc/234234.md",
-    "windows/сук.md",
-    "mac_os/мак.md"
+    "windows/сук.md"
   ]
 }
