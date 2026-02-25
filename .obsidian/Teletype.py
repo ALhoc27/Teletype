@@ -13,21 +13,64 @@ import hashlib
 import shutil
 import asyncio
 from playwright.async_api import async_playwright
-
-class SafeMarkdownConverter(MarkdownConverter):
-    def escape(self, text, parent_tags=None):
-        # вызываем оригинальный escape корректно
-        text = super().escape(text, parent_tags=parent_tags)
-
-        # убираем экранирование markdown-символов
-        text = text.replace(r"\*", "*")
-        text = text.replace(r"\_", "_")
-
-        return text
-
+import uuid
 
 def md_safe(html_text: str) -> str:
-    return SafeMarkdownConverter(heading_style="ATX").convert(html_text)
+    soup = BeautifulSoup(html_text, "html.parser")
+
+    # 1. Убираем <u>, но сохраняем текст
+    for tag in soup.find_all("u"):
+        tag.unwrap()
+
+    # 2. Убираем вложенные <em> внутри <strong>
+    for strong in soup.find_all("strong"):
+        for em in strong.find_all("em"):
+            em.unwrap()
+
+    # 3. Защищаем Windows пути
+    for text in soup.find_all(string=True):
+        if not isinstance(text, NavigableString):
+            continue
+        if text.find_parent("code"):
+            continue
+
+        s = str(text)
+        s = re.sub(
+            r'([A-Z]:\\[^\s<"]+)',
+            lambda m: f"<code>{m.group(1)}</code>",
+            s
+        )
+        if s != text:
+            text.replace_with(s)
+
+    # =========================
+    # INLINE PRESERVE SYSTEM
+    # =========================
+
+    INLINE_TAGS = ["strong", "em", "code", "mark"]
+
+    placeholders = {}
+
+    for tag in soup.find_all(INLINE_TAGS):
+        key = f"INLINEPLACEHOLDER{uuid.uuid4().hex}END"
+        placeholders[key] = str(tag)
+        tag.replace_with(key)
+
+    # 4. Конвертируем в Markdown
+    md = MarkdownConverter(
+        heading_style="ATX",
+        strip=["span"],
+    ).convert(str(soup))
+
+    # 5. Возвращаем inline HTML обратно
+    for key, value in placeholders.items():
+        md = md.replace(key, value)
+
+    # 6. Минимальная чистка
+    md = re.sub(r'\(<(https?://[^>]+)>\)', r'(\1)', md)
+    md = re.sub(r'\*\*\*+', '**', md)
+
+    return md
 
 # ================= НАСТРОЙКИ =================
 
@@ -89,7 +132,8 @@ _original_print = print
 def print(*args, **kwargs):
     _original_print(*args, **kwargs)
     text = " ".join(str(a) for a in args)
-    log_file.write(text + "\n")
+    end = kwargs.get("end", "\n")
+    log_file.write(text + ("" if end == "" else "\n"))
     log_file.flush()
 
 # ================= PLAYWRIGHT SESSION (ASYNC) =====================
@@ -135,6 +179,10 @@ async def close_browser():
     if playwright_instance:
         await playwright_instance.stop()
 
+    context_instance = None
+    browser_instance = None
+    playwright_instance = None
+
 
 # ================= IFRAME IMAGE EXPORT ===================
 from PIL import Image, ImageDraw, ImageFont, ImageChops
@@ -145,7 +193,7 @@ def create_placeholder(img_path: Path, url: str):
     img = Image.new("RGB", (800, 200), color=(240, 240, 240))
     draw = ImageDraw.Draw(img)
     try:
-        font = ImageFont.truetype("arial.ttf", 20)
+        font = ImageFont.truetype("DejaVuSans.ttf", 20)
     except:
         font = ImageFont.load_default()
     text = f"Открыть диаграмму: {url}"
@@ -267,7 +315,6 @@ async def process_iframes(soup: BeautifulSoup, article_url: str, slug: str, curr
         # print("⚠ Page iframe not found — 👉 в HTML не найдено ни одного <iframe>")
         return
 
-    real_sources = [iframe.get("src") for iframe in real_iframes if iframe.get("src")]
     rss_iframes = soup.find_all("iframe")
 
     article_cache = CACHE_ROOT / slug
@@ -277,12 +324,24 @@ async def process_iframes(soup: BeautifulSoup, article_url: str, slug: str, curr
 
     tasks = []
 
+    real_sources = {
+        urljoin(article_url, iframe.get("src"))
+        for iframe in real_iframes
+        if iframe.get("src")
+    }
+
     for i, iframe in enumerate(rss_iframes):
-        if i >= len(real_sources):
+        src = iframe.get("src")
+        if not src:
             iframe.decompose()
             continue
 
-        iframe_url = urljoin(article_url, real_sources[i])
+        iframe_url = urljoin(article_url, src)
+
+        if iframe_url not in real_sources:
+            iframe.decompose()
+            continue
+
         img_name = f"iframe_{i + 1}.png"
         img_path = article_cache / img_name
 
@@ -348,7 +407,7 @@ def normalize_md(text: str) -> str:
     text = text.replace("\r\n", "\n")
     text = re.sub(r"[ \t]+$", "", text, flags=re.MULTILINE)
     text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip() + "\n"
+    return text.strip()
 
 
 
@@ -373,26 +432,7 @@ async def main():
             previous_map = json.loads(RSS_STATE_PATH.read_text("utf-8"))
 
         previous_urls = set(previous_map.keys())
-
-        # ================= DELETE REMOVED ARTICLES ====
-
-        for url in previous_urls - current_urls:
-            slug = previous_map[url]
-
-            print(f"🗑 REMOVE: {slug}")
-
-            for md_file in VAULT_ROOT.rglob(f"{slug}.md"):
-                md_file.unlink()
-
-            cache_dir = CACHE_ROOT / slug
-            if cache_dir.exists():
-                for f in cache_dir.iterdir():
-                    if f.suffix.lower() in IMAGE_EXTS:
-                        print(f"🗑 IMG: {slug}/{f.name}")
-                        stats["images_removed"] += 1
-                shutil.rmtree(cache_dir)
-
-            stats["articles_removed"] += 1
+        new_state_map = previous_map.copy()
 
         # ================= LOAD USED IMAGES STATE ====
 
@@ -424,7 +464,29 @@ async def main():
 
             content_list = entry.get("content") or []
             raw_html = content_list[0].get("value", "") if content_list else ""
-            html_hash = sha(normalize_html_for_hash(raw_html))
+
+            # === Получаем iframe из реальной страницы ДО расчёта hash ===
+            page_soup = BeautifulSoup("", "html.parser")
+            iframe_sources = []
+
+            try:
+                r = session.get(url, timeout=20)
+                if r.status_code == 200:
+                    page_soup = BeautifulSoup(r.text, "html.parser")
+                    iframe_sources = sorted(
+                        urljoin(url, iframe.get("src"))
+                        for iframe in page_soup.find_all("iframe")
+                        if iframe.get("src")
+                    )
+            except:
+                pass
+
+            combined_hash_source = (
+                    normalize_html_for_hash(raw_html)
+                    + json.dumps(iframe_sources, ensure_ascii=False)
+            )
+
+            html_hash = sha(combined_hash_source)
 
             article_cache = CACHE_ROOT / slug
             hash_path = article_cache / ".content.hash"
@@ -434,16 +496,6 @@ async def main():
             if md_path.exists() and old_hash == html_hash:
                 stats["articles_unchanged"] += 1
                 continue
-
-            # Только если изменился — тогда идём на страницу за iframe
-            page_soup = BeautifulSoup("", "html.parser")
-
-            try:
-                r = session.get(url, timeout=20)
-                if r.status_code == 200:
-                    page_soup = BeautifulSoup(r.text, "html.parser")
-            except:
-                pass
 
             soup = BeautifulSoup(raw_html, "html.parser")
 
@@ -470,7 +522,7 @@ async def main():
                 raw = Path(urlparse(img_url).path).name or "image"
                 img_name = normalize_image_name(raw)
 
-                if img_url not in image_index:
+                try:
                     r = await asyncio.to_thread(session.get, img_url, timeout=20)
                     if r.status_code == 200:
                         (article_cache / img_name).write_bytes(r.content)
@@ -478,7 +530,10 @@ async def main():
                         stats["images_http_downloaded"] += 1
                         print(f"⬇ IMG: {slug}/{img_name}")
                     else:
-                        continue  # пропускаем битое изображение
+                        continue
+                except Exception as e:
+                    print(f"❌ IMG download error: {e}")
+                    continue
 
                 current_used.add(image_index[img_url])
                 img_file = article_cache / image_index[img_url]
@@ -486,15 +541,14 @@ async def main():
                 width_part = ""
 
                 try:
-                    from PIL import Image
                     with Image.open(img_file) as im:
-                        new_width = int(im.width * 0.50)
+                        new_width = max(1, int(im.width * 0.5))
                         width_part = f"|{new_width}"
                 except:
                     pass
 
                 img.replace_with(
-                    f"OBSIDIAN_IMAGE::{slug}/{image_index[img_url]}{width_part}"
+                    f"INLINEIMAGEPLACEHOLDER{slug}|||{image_index[img_url]}|||{width_part}END"
                 )
 
             if has_images:
@@ -510,6 +564,8 @@ async def main():
                 for text in soup.find_all(string=True):
                     if not isinstance(text, NavigableString):
                         continue
+                    if text.find_parent(["a", "code", "pre"]):
+                        continue
                     s = str(text)
                     for t in all_titles:
                         if t != title:
@@ -519,16 +575,22 @@ async def main():
 
             # нормализуем путь для Obsidian: убираем \_ и все \ в пути
             content_md = md_safe(str(soup))
+            content_md = html.unescape(content_md)
 
+            # Вставляем Obsidian image ссылки
             content_md = re.sub(
-                r"OBSIDIAN\\?_IMAGE::([^\n]+)",
-                r"![[Teletype_0x/Cach/\1]]",
+                r"INLINEIMAGEPLACEHOLDER(.*?)\|\|\|(.*?)\|\|\|(.*?)END",
+                r"![[Teletype_0x/Cach/\1/\2\3]]",
                 content_md
             )
 
-            content_md = html.unescape(content_md)
-            # FIX: убираем лишний \ перед ** и __
-            content_md = re.sub(r'\\(?=\*\*|__)', '', content_md)
+            # 🔥 Убираем markdown-экранирование из Obsidian путей
+            content_md = re.sub(
+                r"!\\?\\?\\?\[\[(.*?)\]\]",
+                lambda m: m.group(0).replace("\\_", "_"),
+                content_md
+            )
+
 
             created = ""
             if entry.get("published_parsed"):
@@ -564,6 +626,29 @@ async def main():
                 stats["articles_updated"] += 1
 
             processed_count += 1
+            new_state_map[url] = slug
+
+        # ================= DELETE REMOVED ARTICLES (SAFE) ====
+
+        removed_urls = set(previous_map.keys()) - set(current_map.keys())
+
+        for url in removed_urls:
+            slug = previous_map[url]
+
+            print(f"🗑 REMOVE: {slug}")
+
+            for md_file in VAULT_ROOT.rglob(f"{slug}.md"):
+                md_file.unlink()
+
+            cache_dir = CACHE_ROOT / slug
+            if cache_dir.exists():
+                for f in cache_dir.iterdir():
+                    if f.suffix.lower() in IMAGE_EXTS:
+                        print(f"🗑 IMG: {slug}/{f.name}")
+                        stats["images_removed"] += 1
+                shutil.rmtree(cache_dir)
+
+            stats["articles_removed"] += 1
 
         # ================= IMAGE GC ==================
 
@@ -600,7 +685,7 @@ async def main():
 
         # ================= SAVE STATE ================
 
-        RSS_STATE_PATH.write_text(json.dumps(current_map, indent=2), "utf-8")
+        RSS_STATE_PATH.write_text(json.dumps(new_state_map, indent=2), "utf-8")
         USED_IMAGES_PATH.write_text(
             json.dumps({k: sorted(v) for k, v in used_images.items()}, indent=2),
             "utf-8"
