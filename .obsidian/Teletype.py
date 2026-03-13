@@ -28,20 +28,33 @@ def md_safe(html_text: str) -> str:
             em.unwrap()
 
     # 3. Защищаем Windows пути
-    for text in soup.find_all(string=True):
+    for text in list(soup.find_all(string=True)):
         if not isinstance(text, NavigableString):
             continue
         if text.find_parent("code"):
             continue
 
         s = str(text)
-        s = re.sub(
-            r'([A-Z]:\\[^\s<"]+)',
-            lambda m: f"<code>{m.group(1)}</code>",
-            s
-        )
-        if s != text:
-            text.replace_with(s)
+        matches = list(re.finditer(r'([A-Z]:\\[^\s<"]+)', s))
+        if not matches:
+            continue
+
+        new_nodes = []
+        last = 0
+        for m in matches:
+            if m.start() > last:
+                new_nodes.append(s[last:m.start()])
+            code_tag = soup.new_tag("code")
+            code_tag.string = m.group(1)
+            new_nodes.append(code_tag)
+            last = m.end()
+
+        if last < len(s):
+            new_nodes.append(s[last:])
+
+        for node in reversed(new_nodes):
+            text.insert_after(node)
+        text.extract()
 
     # =========================
     # INLINE PRESERVE SYSTEM
@@ -60,6 +73,7 @@ def md_safe(html_text: str) -> str:
     md = MarkdownConverter(
         heading_style="ATX",
         strip=["span"],
+        escape_underscores=False,
     ).convert(str(soup))
 
     # 5. Возвращаем inline HTML обратно
@@ -190,6 +204,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageChops
 
 def create_placeholder(img_path: Path, url: str):
     """Создаёт fallback-изображение с текстом ссылки"""
+    img_path.parent.mkdir(parents=True, exist_ok=True)
     img = Image.new("RGB", (800, 200), color=(240, 240, 240))
     draw = ImageDraw.Draw(img)
     try:
@@ -237,7 +252,7 @@ async def export_drawio_via_svg(context, url: str, img_path: Path):
         page = await context.new_page()
 
         try:
-            html = f"""
+            html_doc = f"""
             <html>
             <body style="margin:0;padding:0;background:white;">
                 <iframe
@@ -249,44 +264,42 @@ async def export_drawio_via_svg(context, url: str, img_path: Path):
             </html>
             """
 
-            await page.set_content(html)
-
-            # ждём загрузку iframe
+            await page.set_content(html_doc)
             await page.wait_for_selector("iframe")
-            # даём iframe начать загрузку
             await asyncio.sleep(0.5)
 
-            element = None
+            iframe_el = await page.query_selector("iframe")
+            if not iframe_el:
+                print("⚠ iframe element не найден → placeholder")
+                create_placeholder(img_path, url)
+                return
+
+            frame = await iframe_el.content_frame()
+            if not frame:
+                print("⚠ iframe content_frame не найден → placeholder")
+                create_placeholder(img_path, url)
+                return
 
             print("🔎 Waiting for viewer render...")
-            # ищем svg ИЛИ canvas
-            for frame in page.frames:
-                try:
-                    await frame.wait_for_selector("svg, canvas", timeout=10000)
-                    elements = await frame.query_selector_all("svg, canvas")
-                    if elements:
-                        element = elements[0]
-                        break
-                except:
-                    continue
+
+            element = None
+            try:
+                await frame.wait_for_selector("svg, canvas", timeout=10000)
+                elements = await frame.query_selector_all("svg, canvas")
+                if elements:
+                    element = elements[0]
+            except:
+                element = None
 
             if not element:
                 print("⚠ SVG/Canvas не найден → placeholder")
                 create_placeholder(img_path, url)
                 return
 
-            box = await element.bounding_box()
-
-            if not box:
-                print("⚠ Bounding box не найден → placeholder")
-                create_placeholder(img_path, url)
-                return
-
             tmp_path = img_path.with_suffix(".tmp.png")
-
             old_hash = file_sha(img_path)
 
-            await page.screenshot(path=str(tmp_path), clip=box)
+            await element.screenshot(path=str(tmp_path))
 
             autocrop_image(tmp_path)
 
@@ -312,7 +325,6 @@ async def process_iframes(soup: BeautifulSoup, article_url: str, slug: str, curr
 
     real_iframes = page_soup.find_all("iframe")
     if not real_iframes:
-        # print("⚠ Page iframe not found — 👉 в HTML не найдено ни одного <iframe>")
         return
 
     rss_iframes = soup.find_all("iframe")
@@ -355,7 +367,6 @@ async def process_iframes(soup: BeautifulSoup, article_url: str, slug: str, curr
             replacement = f"![[Teletype_0x/Cach/{slug}/{img_name}|500]]\n\n"
             iframe.replace_with(replacement)
         else:
-            # удаляем iframe, который не поддерживаем
             iframe.decompose()
 
     if tasks:
@@ -462,6 +473,22 @@ async def main():
             md_path = article_dir / f"{slug}.md"
             is_new = not md_path.exists()
 
+            article_cache = CACHE_ROOT / slug
+            article_cache.mkdir(parents=True, exist_ok=True)
+
+            prev_info = previous_map.get(url)
+            if isinstance(prev_info, dict):
+                old_slug = prev_info.get("slug")
+                old_category = prev_info.get("category")
+            else:
+                old_slug = prev_info
+                old_category = None
+
+            if old_slug and old_category and (old_slug != slug or old_category != category):
+                old_md_path = VAULT_ROOT / old_category / f"{old_slug}.md"
+                if old_md_path.exists() and old_md_path != md_path:
+                    old_md_path.unlink()
+
             content_list = entry.get("content") or []
             raw_html = content_list[0].get("value", "") if content_list else ""
 
@@ -478,8 +505,8 @@ async def main():
                         for iframe in page_soup.find_all("iframe")
                         if iframe.get("src")
                     )
-            except:
-                pass
+            except Exception as e:
+                print(f"⚠ PAGE load error: {e}")
 
             combined_hash_source = (
                     normalize_html_for_hash(raw_html)
@@ -488,13 +515,13 @@ async def main():
 
             html_hash = sha(combined_hash_source)
 
-            article_cache = CACHE_ROOT / slug
             hash_path = article_cache / ".content.hash"
             old_hash = hash_path.read_text("utf-8") if hash_path.exists() else None
 
             # Если RSS HTML не изменился — пропускаем полностью
             if md_path.exists() and old_hash == html_hash:
                 stats["articles_unchanged"] += 1
+                new_state_map[url] = {"slug": slug, "category": category}
                 continue
 
             soup = BeautifulSoup(raw_html, "html.parser")
@@ -525,10 +552,18 @@ async def main():
                 try:
                     r = await asyncio.to_thread(session.get, img_url, timeout=20)
                     if r.status_code == 200:
-                        (article_cache / img_name).write_bytes(r.content)
+                        img_path = article_cache / img_name
+                        new_bytes = r.content
+                        old_bytes = img_path.read_bytes() if img_path.exists() else None
+
+                        if old_bytes != new_bytes:
+                            img_path.write_bytes(new_bytes)
+                            stats["images_http_downloaded"] += 1
+                            print(f"⬇ IMG: {slug}/{img_name}")
+                        else:
+                            print(f"✓ IMG unchanged: {slug}/{img_name}")
+
                         image_index[img_url] = img_name
-                        stats["images_http_downloaded"] += 1
-                        print(f"⬇ IMG: {slug}/{img_name}")
                     else:
                         continue
                 except Exception as e:
@@ -573,7 +608,7 @@ async def main():
                     if s != text:
                         text.replace_with(s)
 
-            # нормализуем путь для Obsidian: убираем \_ и все \ в пути
+            # нормализуем путь для Obsidian
             content_md = md_safe(str(soup))
             content_md = html.unescape(content_md)
 
@@ -584,13 +619,14 @@ async def main():
                 content_md
             )
 
-            # 🔥 Убираем markdown-экранирование из Obsidian путей
-            content_md = re.sub(
-                r"!\\?\\?\\?\[\[(.*?)\]\]",
-                lambda m: m.group(0).replace("\\_", "_"),
-                content_md
-            )
+            # Убираем markdown-экранирование внутри Obsidian путей
+            def unescape_obsidian_links(text: str) -> str:
+                def repl(m):
+                    inner = m.group(1).replace("\\_", "_").replace("\\", "")
+                    return f"![[{inner}]]"
+                return re.sub(r'!\[\[(.*?)\]\]', repl, text)
 
+            content_md = unescape_obsidian_links(content_md)
 
             created = ""
             if entry.get("published_parsed"):
@@ -599,11 +635,11 @@ async def main():
             updated = str(datetime.now().date())
 
             frontmatter = f"""---
-    source: teletype
-    author: {AUTHOR}
-    url: {url}
-    created: {created}
-    updated: {updated}
+source: teletype
+author: {AUTHOR}
+url: {url}
+created: {created}
+updated: {updated}
 ---
 
 """
@@ -615,7 +651,6 @@ async def main():
             tmp_md_path.write_text(final_content, "utf-8")
             tmp_md_path.replace(md_path)
 
-            article_cache.mkdir(parents=True, exist_ok=True)
             hash_path.write_text(html_hash, "utf-8")
 
             if is_new:
@@ -626,19 +661,30 @@ async def main():
                 stats["articles_updated"] += 1
 
             processed_count += 1
-            new_state_map[url] = slug
+            new_state_map[url] = {"slug": slug, "category": category}
 
         # ================= DELETE REMOVED ARTICLES (SAFE) ====
 
         removed_urls = set(previous_map.keys()) - set(current_map.keys())
 
         for url in removed_urls:
-            slug = previous_map[url]
+            prev_info = previous_map[url]
+            if isinstance(prev_info, dict):
+                slug = prev_info.get("slug")
+                old_category = prev_info.get("category")
+            else:
+                slug = prev_info
+                old_category = None
 
             print(f"🗑 REMOVE: {slug}")
 
-            for md_file in VAULT_ROOT.rglob(f"{slug}.md"):
-                md_file.unlink()
+            if old_category:
+                md_file = VAULT_ROOT / old_category / f"{slug}.md"
+                if md_file.exists():
+                    md_file.unlink()
+            else:
+                for md_file in VAULT_ROOT.rglob(f"{slug}.md"):
+                    md_file.unlink()
 
             cache_dir = CACHE_ROOT / slug
             if cache_dir.exists():
@@ -648,6 +694,7 @@ async def main():
                         stats["images_removed"] += 1
                 shutil.rmtree(cache_dir)
 
+            used_images.pop(slug, None)
             stats["articles_removed"] += 1
 
         # ================= IMAGE GC ==================
@@ -657,7 +704,6 @@ async def main():
             if not cache_dir.exists():
                 continue
 
-            # Сравниваем по имени файла (для placeholder)
             used_names = set(imgs)
 
             for f in cache_dir.iterdir():
@@ -666,7 +712,6 @@ async def main():
                     print(f"🗑 IMG: {slug}/{f.name}")
                     stats["images_removed"] += 1
 
-            # Если после удаления нет файлов, удаляем папку
             if cache_dir.exists() and not any(
                     p.suffix.lower() in IMAGE_EXTS for p in cache_dir.iterdir()
             ):
