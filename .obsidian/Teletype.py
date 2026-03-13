@@ -18,67 +18,55 @@ import uuid
 def md_safe(html_text: str) -> str:
     soup = BeautifulSoup(html_text, "html.parser")
 
-    # 1. Убираем <u>, но сохраняем текст
-    for tag in soup.find_all("u"):
-        tag.unwrap()
+    # 1. Удаляем мусорные теги, которые в заметке не нужны
+    for tag in soup(["script", "style", "noscript", "iframe"]):
+        tag.decompose()
 
-    # 2. Убираем вложенные <em> внутри <strong>
+    # 2. Сохраняем underline как HTML, потому что у Obsidian нет нативного underline markdown
+    underline_placeholders = {}
+    for tag in soup.find_all("u"):
+        key = f"UNDERLINEPLACEHOLDER_{uuid.uuid4().hex}"
+        underline_placeholders[key] = str(tag)
+        tag.replace_with(key)
+
+    # 3. Убираем вложенный em внутри strong, чтобы не плодить странный markdown
     for strong in soup.find_all("strong"):
         for em in strong.find_all("em"):
             em.unwrap()
 
-    # 3. Защищаем Windows пути только в обычном тексте
-    win_path_re = re.compile(
-        r'(?<![\w\\])([A-Z]:\\(?:[^\\/:*?"<>|\r\n]+\\)*[^\\/:*?"<>|\r\n]*)'
-    )
+    # 4. Убираем пустые span, но сохраняем их текст/детей
+    for span in soup.find_all("span"):
+        span.unwrap()
 
-    for text in list(soup.find_all(string=True)):
-        if not isinstance(text, NavigableString):
-            continue
-        if text.find_parent(["code", "pre", "a"]):
-            continue
-
-        s = str(text)
-        matches = list(win_path_re.finditer(s))
-        if not matches:
-            continue
-
-        parts = []
-        last = 0
-
-        for m in matches:
-            start, end = m.span(1)
-
-            if start > last:
-                parts.append(s[last:start])
-
-            code_tag = soup.new_tag("code")
-            code_tag.string = m.group(1)
-            parts.append(code_tag)
-
-            last = end
-
-        if last < len(s):
-            parts.append(s[last:])
-
-        current = text
-        for part in parts:
-            if isinstance(part, str):
-                current.insert_before(part)
-            else:
-                current.insert_before(part)
-        current.extract()
-
-    # 4. Конвертируем в Markdown без placeholder-ов
+    # 5. Конвертируем в максимально совместимый с Obsidian markdown
     md = MarkdownConverter(
         heading_style="ATX",
-        strip=["span"],
+        bullets="-",
+        strong_em_symbol="ASTERISK",
         escape_underscores=False,
+        escape_asterisks=False,
+        escape_misc=False,
     ).convert(str(soup))
 
-    # 5. Минимальная чистка
+    # 6. Возвращаем underline назад
+    for key, value in underline_placeholders.items():
+        md = md.replace(key, value)
+
+    # 7. Нормализация под Obsidian
+    md = html.unescape(md)
+    md = md.replace("\r\n", "\n").replace("\r", "\n")
+
+    # markdownify иногда даёт ссылки вида (<https://...>)
     md = re.sub(r'\(<(https?://[^>]+)>\)', r'(\1)', md)
-    md = re.sub(r'\*\*\*+', '**', md)
+
+    # Убираем хвостовые пробелы
+    md = re.sub(r'(?m)[ \t]+$', '', md)
+
+    # Нормализуем количество пустых строк
+    md = re.sub(r'\n{3,}', '\n\n', md)
+
+    # Убираем пустые пункты списков, если появились артефакты
+    md = re.sub(r'(?m)^\s*[-*]\s*$', '', md)
     md = re.sub(r'\n{3,}', '\n\n', md)
 
     return md.strip()
@@ -620,8 +608,13 @@ async def main():
             # Убираем markdown-экранирование внутри Obsidian путей
             def unescape_obsidian_links(text: str) -> str:
                 def repl(m):
-                    inner = m.group(1).replace("\\_", "_").replace("\\", "")
+                    inner = m.group(1)
+                    inner = inner.replace("\\_", "_")
+                    inner = inner.replace("\\[", "[")
+                    inner = inner.replace("\\]", "]")
+                    inner = inner.replace("\\|", "|")
                     return f"![[{inner}]]"
+
                 return re.sub(r'!\[\[(.*?)\]\]', repl, text)
 
             content_md = unescape_obsidian_links(content_md)
