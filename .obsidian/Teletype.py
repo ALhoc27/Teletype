@@ -27,64 +27,62 @@ def md_safe(html_text: str) -> str:
         for em in strong.find_all("em"):
             em.unwrap()
 
-    # 3. Защищаем Windows пути
+    # 3. Защищаем Windows пути только в обычном тексте
+    win_path_re = re.compile(
+        r'(?<![\w\\])([A-Z]:\\(?:[^\\/:*?"<>|\r\n]+\\)*[^\\/:*?"<>|\r\n]*)'
+    )
+
     for text in list(soup.find_all(string=True)):
         if not isinstance(text, NavigableString):
             continue
-        if text.find_parent("code"):
+        if text.find_parent(["code", "pre", "a"]):
             continue
 
         s = str(text)
-        matches = list(re.finditer(r'([A-Z]:\\[^\s<"]+)', s))
+        matches = list(win_path_re.finditer(s))
         if not matches:
             continue
 
-        new_nodes = []
+        parts = []
         last = 0
+
         for m in matches:
-            if m.start() > last:
-                new_nodes.append(s[last:m.start()])
+            start, end = m.span(1)
+
+            if start > last:
+                parts.append(s[last:start])
+
             code_tag = soup.new_tag("code")
             code_tag.string = m.group(1)
-            new_nodes.append(code_tag)
-            last = m.end()
+            parts.append(code_tag)
+
+            last = end
 
         if last < len(s):
-            new_nodes.append(s[last:])
+            parts.append(s[last:])
 
-        for node in reversed(new_nodes):
-            text.insert_after(node)
-        text.extract()
+        current = text
+        for part in parts:
+            if isinstance(part, str):
+                current.insert_before(part)
+            else:
+                current.insert_before(part)
+        current.extract()
 
-    # =========================
-    # INLINE PRESERVE SYSTEM
-    # =========================
-
-    INLINE_TAGS = ["strong", "em", "code", "mark"]
-
-    placeholders = {}
-
-    for tag in soup.find_all(INLINE_TAGS):
-        key = f"INLINEPLACEHOLDER{uuid.uuid4().hex}END"
-        placeholders[key] = str(tag)
-        tag.replace_with(key)
-
-    # 4. Конвертируем в Markdown
+    # 4. Конвертируем в Markdown без placeholder-ов
     md = MarkdownConverter(
         heading_style="ATX",
         strip=["span"],
         escape_underscores=False,
     ).convert(str(soup))
 
-    # 5. Возвращаем inline HTML обратно
-    for key, value in placeholders.items():
-        md = md.replace(key, value)
-
-    # 6. Минимальная чистка
+    # 5. Минимальная чистка
     md = re.sub(r'\(<(https?://[^>]+)>\)', r'(\1)', md)
     md = re.sub(r'\*\*\*+', '**', md)
+    md = re.sub(r'\n{3,}', '\n\n', md)
 
-    return md
+    return md.strip()
+
 
 # ================= НАСТРОЙКИ =================
 

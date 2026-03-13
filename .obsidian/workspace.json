@@ -11,14 +11,10 @@
             "id": "d4c64bb1497b5298",
             "type": "leaf",
             "state": {
-              "type": "markdown",
-              "state": {
-                "file": "программы/Открыть диспетчер задач из под 1С (Диспетчер задач).md",
-                "mode": "preview",
-                "source": false
-              },
+              "type": "empty",
+              "state": {},
               "icon": "lucide-file",
-              "title": "Открыть диспетчер задач из под 1С (Диспетчер задач)"
+              "title": "Новая вкладка"
             }
           }
         ]
@@ -185,7 +181,7 @@
       "omnisearch:Omnisearch": false
     }
   },
-  "active": "d4c64bb1497b5298",
+  "active": "d4323fffde76c2c8",
   "lastOpenFiles": [
     "программы/Очистить кеш FileZilla.md",
     "mac_os/Как включить запись экрана (MAC).md",
